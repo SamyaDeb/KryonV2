@@ -1,0 +1,16 @@
+[package]
+name = "order-types"
+description = "Shared order and fill types for matcher and settlement gateway."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+protocol-core = { workspace = true }
+soroban-sdk = { workspace = true }

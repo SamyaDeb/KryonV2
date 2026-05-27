@@ -1,0 +1,286 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum TxStatus {
+  QUEUED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+}
+
+enum KeeperActionStatus {
+  PLANNED
+  SUBMITTED
+  CONFIRMED
+  FAILED
+  SKIPPED
+}
+
+enum AuditSeverity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+model LedgerCursor {
+  id          String   @id
+  network    String
+  contractId String?
+  ledger     Int
+  cursor     String
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  @@unique([network, contractId])
+  @@index([network, ledger])
+}
+
+model ProtocolEvent {
+  id        BigInt   @id @default(autoincrement())
+  network   String
+  ledger    Int
+  txHash    String
+  topic     String
+  payload   Json
+  replayKey String   @unique
+  createdAt DateTime @default(now())
+
+  @@index([network, ledger])
+  @@index([txHash])
+  @@index([topic])
+}
+
+model Market {
+  id                     Int      @id
+  symbol                 String
+  settlementAsset        String
+  active                 Boolean  @default(false)
+  lastPrice              String   @default("0")
+  volume                 String   @default("0")
+  longOpenInterest       String   @default("0")
+  shortOpenInterest      String   @default("0")
+  fundingLongIndex       String   @default("0")
+  fundingShortIndex      String   @default("0")
+  lastOraclePrice        String   @default("0")
+  lastOracleLedger       Int      @default(0)
+  updatedAt              DateTime @updatedAt
+  createdAt              DateTime @default(now())
+
+  positions              Position[]
+  fills                  Fill[]
+  oracleSnapshots        OracleSnapshot[]
+  fundingUpdates         FundingUpdate[]
+  keeperActions          KeeperAction[]
+}
+
+model Account {
+  address          String    @id
+  collateral       Json      @default("{}")
+  cancelledNonces  BigInt[]  @default([])
+  filledByNonce    Json      @default("{}")
+  updatedAt         DateTime  @updatedAt
+  createdAt         DateTime  @default(now())
+
+  orders            Order[]
+  positions         Position[]
+  makerFills        Fill[]    @relation("MakerFills")
+  takerFills        Fill[]    @relation("TakerFills")
+}
+
+model Order {
+  id          String   @id
+  owner       String
+  marketId    Int
+  isLong      Boolean
+  size        String
+  limitPrice  String
+  reduceOnly  Boolean
+  nonce       BigInt
+  expiryTs    BigInt
+  cancelled   Boolean  @default(false)
+  filledSize  String   @default("0")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  account     Account  @relation(fields: [owner], references: [address])
+
+  @@unique([owner, nonce])
+  @@index([marketId, isLong, limitPrice])
+  @@index([expiryTs])
+}
+
+model Fill {
+  id          BigInt   @id @default(autoincrement())
+  network     String
+  marketId    Int
+  maker        String
+  makerNonce   BigInt
+  taker        String
+  takerNonce   BigInt
+  fillSize     String
+  fillPrice    String
+  feeMaker     String   @default("0")
+  feeTaker     String   @default("0")
+  txHash       String
+  ledger       Int
+  createdAt    DateTime @default(now())
+
+  market       Market   @relation(fields: [marketId], references: [id])
+  makerAccount Account  @relation("MakerFills", fields: [maker], references: [address])
+  takerAccount Account  @relation("TakerFills", fields: [taker], references: [address])
+
+  @@unique([network, txHash, maker, makerNonce, taker, takerNonce])
+  @@index([marketId, ledger])
+  @@index([maker])
+  @@index([taker])
+}
+
+model Position {
+  id               String   @id
+  owner            String
+  marketId         Int
+  positionId       BigInt
+  size             String
+  entryPrice       String
+  margin           String   @default("0")
+  isLong           Boolean
+  lastFundingIndex String
+  mode             String
+  updatedAt        DateTime @updatedAt
+  createdAt        DateTime @default(now())
+
+  account          Account  @relation(fields: [owner], references: [address])
+  market           Market   @relation(fields: [marketId], references: [id])
+
+  @@unique([owner, positionId])
+  @@index([marketId, isLong])
+}
+
+model OracleSnapshot {
+  id          BigInt   @id @default(autoincrement())
+  network     String
+  marketId    Int
+  asset       String
+  source      String
+  price       String
+  confidence  String
+  publishTime BigInt
+  writeTime   BigInt
+  ledger      Int
+  txHash      String
+  createdAt   DateTime @default(now())
+
+  market      Market   @relation(fields: [marketId], references: [id])
+
+  @@unique([network, asset, publishTime, source])
+  @@index([marketId, ledger])
+  @@index([asset, publishTime])
+}
+
+model FundingUpdate {
+  id          BigInt   @id @default(autoincrement())
+  network     String
+  marketId    Int
+  longIndex   String
+  shortIndex  String
+  ledger      Int
+  txHash      String
+  createdAt   DateTime @default(now())
+
+  market      Market   @relation(fields: [marketId], references: [id])
+
+  @@unique([network, marketId, ledger, txHash])
+  @@index([marketId, ledger])
+}
+
+model TxJob {
+  id             BigInt   @id @default(autoincrement())
+  network        String
+  kind           String
+  payloadHash    String
+  unsignedXdr    String?
+  signedXdr      String?
+  attempts       Int      @default(0)
+  status         TxStatus @default(QUEUED)
+  lastError      String?
+  submittedHash  String?
+  nextAttemptAt  DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([network, kind, payloadHash])
+  @@index([status, nextAttemptAt])
+  @@index([submittedHash])
+}
+
+model KeeperAction {
+  id          BigInt             @id @default(autoincrement())
+  network     String
+  kind        String
+  marketId    Int?
+  account     String?
+  payload     Json
+  status      KeeperActionStatus @default(PLANNED)
+  txJobId     BigInt?
+  ledger      Int?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  market      Market?            @relation(fields: [marketId], references: [id])
+
+  @@index([network, kind, status])
+  @@index([marketId])
+}
+
+model DeploymentArtifact {
+  id           String   @id
+  network      String
+  contractName String
+  contractId   String
+  wasmHash     String
+  gitCommit    String
+  manifest     Json
+  createdAt    DateTime @default(now())
+
+  @@unique([network, contractName])
+  @@index([wasmHash])
+}
+
+model GovernanceProposal {
+  id          BigInt   @id
+  network     String
+  target      String
+  action      String
+  wasmHash    String
+  eta         BigInt
+  executed    Boolean  @default(false)
+  cancelled   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([network, eta])
+}
+
+model AuditFinding {
+  id          String        @id
+  severity    AuditSeverity
+  title       String
+  component   String
+  status      String
+  description String
+  evidence    Json
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([severity, status])
+  @@index([component])
+}

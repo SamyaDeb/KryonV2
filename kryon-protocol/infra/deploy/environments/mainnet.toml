@@ -1,0 +1,43 @@
+[network]
+name = "stellar-mainnet"
+rpc_url = ""
+passphrase = "Public Global Stellar Network ; September 2015"
+
+[contracts]
+governance = ""
+oracle_adapter = ""
+vault = ""
+engine = ""
+order_gateway = ""
+insurance = ""
+liquidation = ""
+risk = ""
+
+[governance]
+min_delay_secs = 172800
+guardian = ""
+admin_multisig = ""
+
+[keepers]
+oracle_interval_secs = 5
+funding_interval_secs = 60
+liquidation_interval_secs = 3
+tx_retry_limit = 5
+
+[risk_limits]
+max_oracle_age_secs = 30
+max_oracle_confidence_bps = 100
+max_execution_deviation_bps = 75
+
+[initial_market]
+market_id = 1
+symbol = "XLM-PERP"
+base_asset = "XLM"
+quote_asset = "USDC"
+settlement_asset = "USDC"
+max_leverage_bps = 50000
+initial_margin_bps = 2000
+maintenance_margin_bps = 1000
+liquidation_fee_bps = 50
+max_open_interest = "0"
+funding_interval_secs = 3600

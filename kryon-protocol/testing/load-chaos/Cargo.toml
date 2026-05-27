@@ -1,0 +1,16 @@
+[package]
+name = "load-chaos"
+description = "Deterministic load and chaos scenarios for runtime services."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+indexer-api = { path = "../../services/indexer-api" }
+monitoring = { path = "../../services/monitoring" }
+node-runtime = { path = "../../services/node-runtime" }
+order-types = { workspace = true }
+protocol-core = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }

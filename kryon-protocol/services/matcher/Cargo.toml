@@ -1,0 +1,19 @@
+[package]
+name = "matcher"
+description = "Deterministic off-chain CLOB matcher for the redesigned perp protocol."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[dependencies]
+order-types = { workspace = true }
+protocol-core = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

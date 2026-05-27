@@ -1,0 +1,16 @@
+[package]
+name = "indexer-api"
+description = "Deterministic state reconstruction and API view models for Krypton services."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+order-types = { workspace = true }
+protocol-core = { workspace = true }
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

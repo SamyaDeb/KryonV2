@@ -1,0 +1,17 @@
+[package]
+name = "hardening"
+description = "Invariant and adversarial scenario checks for Krypton protocol components."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+indexer-api = { path = "../../services/indexer-api" }
+keepers = { path = "../../services/keepers" }
+monitoring = { path = "../../services/monitoring" }
+order-types = { workspace = true }
+protocol-core = { workspace = true }
+risk-engine = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }

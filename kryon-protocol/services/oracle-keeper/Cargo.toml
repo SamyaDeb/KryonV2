@@ -1,0 +1,11 @@
+[package]
+name = "oracle-keeper"
+description = "Deterministic provider quote normalization for Krypton oracle publishers."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+protocol-core = { workspace = true }

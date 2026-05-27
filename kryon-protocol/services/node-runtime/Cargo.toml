@@ -1,0 +1,18 @@
+[package]
+name = "node-runtime"
+description = "HTTP, persistence, RPC-ingestion, and transaction submission runtime primitives."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+indexer-api = { path = "../indexer-api" }
+keepers = { path = "../keepers" }
+monitoring = { path = "../monitoring" }
+order-types = { workspace = true }
+protocol-core = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

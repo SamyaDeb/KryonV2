@@ -1,0 +1,15 @@
+[package]
+name = "keepers"
+description = "Deterministic keeper decision engine for funding, oracle, and liquidation jobs."
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+protocol-core = { workspace = true }
+risk-engine = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
