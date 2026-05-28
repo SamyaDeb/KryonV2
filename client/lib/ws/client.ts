@@ -62,13 +62,18 @@ function stopPing() {
   }
 }
 
+function withJitter(delay: number): number {
+  // ±20% random jitter prevents thundering herd when many tabs reconnect simultaneously
+  return delay * (0.8 + Math.random() * 0.4);
+}
+
 function scheduleReconnect() {
   if (isDestroyed) return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
-  }, reconnectDelay);
+  }, withJitter(reconnectDelay));
   reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
 }
 
