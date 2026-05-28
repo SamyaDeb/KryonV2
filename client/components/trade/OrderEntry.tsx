@@ -209,6 +209,13 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
   const [mode, setMode] = useState<"market" | "limit">("market");
   const [size, setSize] = useState("");
   const [limitPrice, setLimitPrice] = useState("");
+
+  const sanitizeNumericInput = (val: string): string => {
+    // Allow only digits and a single decimal point; strip leading zeros
+    const cleaned = val.replace(/[^0-9.]/g, "").replace(/^0+(\d)/, "$1");
+    const parts = cleaned.split(".");
+    return parts.length > 2 ? parts[0] + "." + parts.slice(1).join("") : cleaned;
+  };
   const [leverage, setLeverage] = useState(15);
   const [margin, setMargin] = useState<"Cross" | "Isolated">("Cross");
   const [reduce, setReduce] = useState(false);
@@ -438,7 +445,7 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
                 className="flex-1 bg-transparent border-0 outline-none text-[#e6e6e6] font-mono text-[22px] font-medium text-right w-full"
                 placeholder={midDisplay}
                 value={limitPrice}
-                onChange={(e) => setLimitPrice(e.target.value)}
+                onChange={(e) => setLimitPrice(sanitizeNumericInput(e.target.value))}
               />
               <button className="flex items-center gap-1.5 px-[10px] py-1 bg-[#0a0b0d] border border-[#1f232a] rounded-[6px] text-[#e6e6e6] text-[13px] font-medium shrink-0">
                 USDC
@@ -460,7 +467,7 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
               className="flex-1 bg-transparent border-0 outline-none text-[#e6e6e6] font-mono text-[22px] font-medium text-right w-full"
               placeholder="0"
               value={size}
-              onChange={(e) => setSize(e.target.value)}
+              onChange={(e) => setSize(sanitizeNumericInput(e.target.value))}
             />
           </div>
           <div className="flex items-center justify-between">
