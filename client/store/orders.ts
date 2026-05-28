@@ -12,11 +12,18 @@ const bigIntStorage = createJSONStorage(() => localStorage, {
       : value,
 });
 
+type TrackedOrder = OrderIntent & {
+  status: "pending" | "filled" | "cancelled";
+  addedAt: number;
+};
+
 interface OrdersState {
-  orders: (OrderIntent & { status: "pending" | "filled" | "cancelled" })[];
+  orders: TrackedOrder[];
   addOrder: (intent: OrderIntent) => void;
   cancelOrder: (nonce: bigint) => void;
   markFilled: (nonce: bigint) => void;
+  clearCancelled: () => void;
+  clearAll: () => void;
 }
 
 export const useLocalOrders = create<OrdersState>()(
@@ -26,7 +33,7 @@ export const useLocalOrders = create<OrdersState>()(
       addOrder: (intent) =>
         set((s) => ({
           orders: [
-            { ...intent, status: "pending" as const },
+            { ...intent, status: "pending" as const, addedAt: Date.now() },
             ...s.orders.slice(0, 99),
           ],
         })),
@@ -42,6 +49,11 @@ export const useLocalOrders = create<OrdersState>()(
             o.nonce === nonce ? { ...o, status: "filled" as const } : o
           ),
         })),
+      clearCancelled: () =>
+        set((s) => ({
+          orders: s.orders.filter((o) => o.status !== "cancelled"),
+        })),
+      clearAll: () => set({ orders: [] }),
     }),
     {
       name: "kryon-orders",
