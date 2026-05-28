@@ -31,12 +31,37 @@ export const MARKETS: Record<string, MarketConfig> = {
     baseAsset: "XLM",
     quoteAsset: "USDC",
     settlementAsset: ASSETS.usdc,
-    // TV widget symbol (best available proxy for XLM price)
     tvSymbol: "COINBASE:XLMUSD",
     maxLeverageBps: 100000, // 10x
     initialMarginBps: 1000,  // 10%
     maintenanceMarginBps: 500, // 5%
     liquidationFeeBps: 50,
+  },
+  "BTC-PERP": {
+    marketId: 2,
+    symbol: "BTC-PERP",
+    displayName: "BTC-PERP",
+    baseAsset: "BTC",
+    quoteAsset: "USDC",
+    settlementAsset: ASSETS.usdc,
+    tvSymbol: "COINBASE:BTCUSD",
+    maxLeverageBps: 500000, // 50x
+    initialMarginBps: 200,   // 2%
+    maintenanceMarginBps: 100, // 1%
+    liquidationFeeBps: 25,
+  },
+  "ETH-PERP": {
+    marketId: 3,
+    symbol: "ETH-PERP",
+    displayName: "ETH-PERP",
+    baseAsset: "ETH",
+    quoteAsset: "USDC",
+    settlementAsset: ASSETS.usdc,
+    tvSymbol: "COINBASE:ETHUSD",
+    maxLeverageBps: 200000, // 20x
+    initialMarginBps: 500,   // 5%
+    maintenanceMarginBps: 250, // 2.5%
+    liquidationFeeBps: 35,
   },
 };
 
