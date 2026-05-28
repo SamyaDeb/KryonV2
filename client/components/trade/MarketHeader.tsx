@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { MarketConfig } from "@/lib/config";
 import { getOpenInterest, getFundingState } from "@/lib/stellar/contracts";
-import { formatAmount, formatFundingRate, priceToHuman } from "@/lib/format";
+import { formatAmount, formatFundingRate, formatChangePercent, priceToHuman } from "@/lib/format";
 import { useMarketStore } from "@/store/market";
 
 const StellarIcon = () => (
@@ -21,7 +21,7 @@ const CaretIcon = () => (
 );
 
 export function MarketHeader({ market }: { market: MarketConfig }) {
-  const { markPrices, marketStats } = useMarketStore();
+  const { markPrices, marketStats, priceChangePct } = useMarketStore();
   const markPrice = markPrices[market.marketId];
   const stats = marketStats[market.marketId];
 
@@ -65,18 +65,26 @@ export function MarketHeader({ market }: { market: MarketConfig }) {
     ? "$" + formatAmount(oiLong + oiShort, 0)
     : "—";
 
+  const changePct = priceChangePct[market.marketId];
+  const changeDisplay = changePct !== undefined
+    ? formatChangePercent(changePct)
+    : "—";
+  const changeUp = changePct === undefined || changePct >= 0;
+
   const statItems = [
     {
       l: "Mark",
       v: markHuman !== null ? "$" + markHuman.toFixed(4) : "—",
     },
     {
-      l: "Index",
-      v: markHuman !== null ? "$" + markHuman.toFixed(4) : "—",
-    },
-    {
       l: "Last Price",
       v: lastPriceDisplay,
+    },
+    {
+      l: "24h Change",
+      v: changeDisplay,
+      up: changeUp,
+      hasColor: true,
     },
     {
       l: "24h Volume",
