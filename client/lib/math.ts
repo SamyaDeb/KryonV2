@@ -1,4 +1,4 @@
-import { PRICE_PRECISION, BPS_PRECISION } from "./config";
+import { PRICE_PRECISION, AMOUNT_PRECISION, BPS_PRECISION } from "./config";
 
 /**
  * Approximate liquidation price for a cross-margin perp position.
@@ -30,6 +30,33 @@ export function calcLiqPrice(
     const factor = SCALE + (SCALE * SCALE) / leverageScaled - mmRate;
     return (entryPrice * factor) / SCALE;
   }
+}
+
+/**
+ * Margin ratio = margin / notional value.  Returns a plain float (0–1+).
+ * margin and notional must share the same precision unit (e.g. both AMOUNT_PRECISION).
+ */
+export function calcMarginRatio(margin: bigint, notional: bigint): number {
+  if (notional <= 0n) return 0;
+  return Number((margin * 10_000n) / notional) / 10_000;
+}
+
+/**
+ * Maximum position size (in base asset, AMOUNT_PRECISION units) a trader
+ * can open given their available collateral, target leverage, and mark price.
+ *
+ * maxSize = (collateral * leverage * PRICE_PRECISION) / (markPrice * AMOUNT_PRECISION)
+ * Result is in AMOUNT_PRECISION (1e7).
+ */
+export function calcMaxPositionSize(
+  collateral: bigint,
+  leverage: number,
+  markPrice: bigint
+): bigint {
+  if (markPrice <= 0n || leverage <= 0 || collateral <= 0n) return 0n;
+  const leverageScaled = BigInt(Math.round(leverage * 1_000));
+  return (collateral * leverageScaled * PRICE_PRECISION) /
+    (markPrice * 1_000n * AMOUNT_PRECISION);
 }
 
 /**
