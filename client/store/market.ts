@@ -21,6 +21,10 @@ interface MarketState {
   marketStats: Record<number, { lastPrice: bigint; volume: bigint; longOI: bigint; shortOI: bigint } | null>;
   setMarketStats: (marketId: number, stats: { lastPrice: bigint; volume: bigint; longOI: bigint; shortOI: bigint }) => void;
 
+  // 24h price change percentage by marketId (positive = up, negative = down)
+  priceChangePct: Record<number, number>;
+  setPriceChangePct: (marketId: number, pct: number) => void;
+
   // WebSocket connection status
   wsConnected: boolean;
   setWsConnected: (v: boolean) => void;
@@ -49,6 +53,10 @@ export const useMarketStore = create<MarketState>((set) => ({
   marketStats: {},
   setMarketStats: (marketId, stats) =>
     set((s) => ({ marketStats: { ...s.marketStats, [marketId]: stats } })),
+
+  priceChangePct: {},
+  setPriceChangePct: (marketId, pct) =>
+    set((s) => ({ priceChangePct: { ...s.priceChangePct, [marketId]: pct } })),
 
   wsConnected: false,
   setWsConnected: (wsConnected) => set({ wsConnected }),
