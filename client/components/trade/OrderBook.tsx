@@ -34,9 +34,11 @@ export function OrderBook({ marketId }: { marketId: number }) {
   const book = orderBooks[marketId];
   const trades = recentTrades[marketId] ?? [];
 
+  const BOOK_DEPTH = 14;
+
   // Compute cumulative depth from spread outward
-  const rawAsks = book?.asks.slice(0, 14) ?? [];
-  const rawBids = book?.bids.slice(0, 14) ?? [];
+  const rawAsks = book?.asks.slice(0, BOOK_DEPTH) ?? [];
+  const rawBids = book?.bids.slice(0, BOOK_DEPTH) ?? [];
 
   let runA = 0;
   const asks: LevelWithCum[] = rawAsks.map((a) => {
@@ -50,8 +52,14 @@ export function OrderBook({ marketId }: { marketId: number }) {
     return { ...b, cum: runB };
   });
 
-  const maxA = asks.length ? asks[asks.length - 1].cum : 1;
-  const maxB = bids.length ? bids[bids.length - 1].cum : 1;
+  // Use the larger side's total as the common scale so depth bars are comparable across sides
+  const maxDepth = Math.max(
+    asks.length ? asks[asks.length - 1].cum : 0,
+    bids.length ? bids[bids.length - 1].cum : 0,
+    1
+  );
+  const maxA = maxDepth;
+  const maxB = maxDepth;
 
   // Asks displayed highest-to-lowest (so best ask is closest to spread row)
   const displayAsks = [...asks].reverse();
@@ -279,15 +287,23 @@ function BookRow({
 }
 
 function EmptyRows({ count, side }: { count: number; side: "ask" | "bid" }) {
+  const widths = [40, 56, 32, 48, 36, 52, 28, 44, 60, 34, 50, 38, 46, 30];
   return (
     <>
       {Array.from({ length: count }).map((_, i) => (
-        <div key={i} style={{ padding: "3.5px 14px", lineHeight: 1.45 }} className="flex items-center">
+        <div
+          key={i}
+          className="grid grid-cols-3 font-mono text-[12px]"
+          style={{ padding: "3.5px 14px", lineHeight: 1.45 }}
+        >
           <div
-            className={`h-[5px] rounded-full w-10 opacity-[0.06] ${
+            className={`h-[5px] rounded-full opacity-[0.06] ${
               side === "ask" ? "bg-[#e34c4c]" : "bg-[#1fae5b]"
             }`}
+            style={{ width: widths[i % widths.length] }}
           />
+          <div className="h-[5px] rounded-full bg-[#2a2f37] opacity-[0.06] ml-auto" style={{ width: 36 }} />
+          <div className="h-[5px] rounded-full bg-[#2a2f37] opacity-[0.06] ml-auto" style={{ width: 44 }} />
         </div>
       ))}
     </>
