@@ -3,7 +3,7 @@ import {
   Keypair, Account, Contract, TransactionBuilder,
   nativeToScVal, Address, xdr, rpc as sorobanRpc
 } from "@stellar/stellar-sdk";
-import { CONTRACTS, ASSETS, NETWORK } from "@/lib/config";
+import { CONTRACTS, ASSETS, NETWORK } from "@/config";
 import { simulateSettleFill } from "@/lib/stellar/settlement";
 
 const FEE = "1000000";

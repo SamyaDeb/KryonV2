@@ -1,5 +1,5 @@
 import { Keypair, Account, Contract, TransactionBuilder, Address, xdr, rpc, scValToNative } from "@stellar/stellar-sdk";
-import { CONTRACTS, ASSETS, NETWORK } from "@/lib/config";
+import { CONTRACTS, ASSETS, NETWORK } from "@/config";
 const kp = Keypair.fromSecret(process.env.ORACLE_PUBLISHER_SECRET!);
 const admin = kp.publicKey();
 const server = new rpc.Server(NETWORK.rpcUrl);

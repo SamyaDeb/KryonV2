@@ -1,6 +1,6 @@
 "use client";
 
-import { CONTRACTS, ASSETS } from "../config";
+import { CONTRACTS, ASSETS } from "@/config";
 import { simulateRead, invokeContract } from "./invoke";
 import { addressToScVal, u32ToScVal, i128ToScVal, scValToI128 } from "./scval";
 import { rpc } from "@stellar/stellar-sdk";
@@ -96,6 +96,18 @@ export async function isCancelled(userAddress: string, nonce: bigint): Promise<b
   if (!val) return false;
   const { scValToNative } = await import("@stellar/stellar-sdk");
   return Boolean(scValToNative(val));
+}
+
+// Cumulative filled size for an (owner, nonce) order, tracked on-chain by the
+// gateway. Used to reconcile local "pending" orders against on-chain truth.
+export async function getOrderFilled(userAddress: string, nonce: bigint): Promise<bigint> {
+  const { u64ToScVal } = await import("./scval");
+  const val = await simulateRead(
+    CONTRACTS.orderGateway,
+    "filled",
+    [addressToScVal(userAddress), u64ToScVal(nonce)]
+  );
+  return val ? scValToI128(val) : 0n;
 }
 
 // ─── Write calls (require Freighter signature) ────────────────────────────────

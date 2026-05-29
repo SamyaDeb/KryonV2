@@ -1,36 +1,51 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Kryon — Frontend
 
-## Getting Started
+Stellar/Soroban perpetual-futures DEX terminal (Next.js 16 + React 19). Launch market: **XLM-PERP**, USDC-settled, on Stellar **testnet**.
 
-First, run the development server:
+## Prerequisites
+
+- [Bun](https://bun.sh)
+- [Freighter](https://freighter.app) wallet, set to **Stellar Testnet**
+- A desktop / large screen (≥ 1024px) — the terminal is desktop-first
+
+## Setup
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+bun install
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create `.env` (Next.js) **and** `.env.local` (the off-chain scripts read this):
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```ini
+DATABASE_URL="postgresql://…neon.tech/db?sslmode=require"   # Neon Postgres
+ORACLE_PUBLISHER_SECRET="S…"                                 # authorized oracle publisher key
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Order & market data uses the app's own `/api` routes (same-origin) — no matcher/indexer URL needed.
 
-## Learn More
+## Run
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+bun run dev        # http://localhost:3000  →  /trade/XLM-PERP
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+### Off-chain services (run for live prices & fills)
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+bun run dev:oracle     # publish XLM price on-chain (~8s)
+bun run dev:matcher    # match orders + settle fills on-chain
+bun run dev:indexer    # sync on-chain state → DB
+```
 
-## Deploy on Vercel
+## Other
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+bun run build && bun run start   # production
+bun run lint
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Routes
+
+- `/trade/[market]` — trading terminal (e.g. `/trade/XLM-PERP`)
+- `/portfolio` — account overview
+- `/leaderboard` — trader rankings

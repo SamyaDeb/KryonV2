@@ -2,7 +2,7 @@ import {
   Keypair, Account, Contract, TransactionBuilder,
   nativeToScVal, Address, xdr, rpc as sorobanRpc
 } from "@stellar/stellar-sdk";
-import { CONTRACTS, ASSETS, NETWORK } from "@/lib/config";
+import { CONTRACTS, ASSETS, NETWORK } from "@/config";
 
 const FEE = "2000000";
 function mapEntry(k: string, v: xdr.ScVal) { return new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v }); }

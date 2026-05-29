@@ -2,7 +2,7 @@ import {
   Keypair, Account, Contract, TransactionBuilder, Address,
   nativeToScVal, xdr, rpc as sorobanRpc
 } from "@stellar/stellar-sdk";
-import { CONTRACTS, NETWORK } from "@/lib/config";
+import { CONTRACTS, NETWORK } from "@/config";
 
 const FEE = "2000000";
 const now = BigInt(Math.floor(Date.now()/1000));

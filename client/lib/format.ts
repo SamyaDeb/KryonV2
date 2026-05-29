@@ -1,4 +1,4 @@
-import { PRICE_PRECISION, AMOUNT_PRECISION, BPS_PRECISION } from "./config";
+import { PRICE_PRECISION, AMOUNT_PRECISION, BPS_PRECISION } from "@/config";
 
 export function priceToHuman(raw: bigint): number {
   return Number(raw * 10000n / PRICE_PRECISION) / 10000;

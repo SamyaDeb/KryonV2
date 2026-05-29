@@ -1,4 +1,4 @@
-import { PRICE_PRECISION, AMOUNT_PRECISION, BPS_PRECISION } from "./config";
+import { PRICE_PRECISION, AMOUNT_PRECISION, BPS_PRECISION } from "@/config";
 
 /**
  * Approximate liquidation price for a cross-margin perp position.

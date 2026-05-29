@@ -12,7 +12,7 @@ import {
   xdr,
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
-import { CONTRACTS, NETWORK } from "../config";
+import { CONTRACTS, NETWORK } from "@/config";
 
 const FEE = "500000";
 

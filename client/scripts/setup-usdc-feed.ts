@@ -2,7 +2,7 @@ import {
   Keypair, Account, Contract, TransactionBuilder,
   nativeToScVal, xdr, rpc as sorobanRpc
 } from "@stellar/stellar-sdk";
-import { CONTRACTS, NETWORK } from "@/lib/config";
+import { CONTRACTS, NETWORK } from "@/config";
 
 const FEE = "1000000";
 function sleep(ms: number) { return new Promise(r => setTimeout(r, ms)); }

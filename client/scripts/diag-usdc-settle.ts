@@ -1,5 +1,5 @@
 import { Keypair, Account, Contract, TransactionBuilder, nativeToScVal, Address, xdr, rpc } from "@stellar/stellar-sdk";
-import { CONTRACTS, NETWORK } from "@/lib/config";
+import { CONTRACTS, NETWORK } from "@/config";
 const FEE = "2000000";
 const USDC = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 function mapEntry(k: string, v: xdr.ScVal) { return new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol(k), val: v }); }
