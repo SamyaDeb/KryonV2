@@ -55,21 +55,44 @@ export default function PortfolioPage() {
     refetchInterval: 10_000,
   });
 
+  // Historical analytics (realized pnl, volume, deposits, win rate) from indexer.
+  const { data: portfolio } = useQuery({
+    queryKey: ["portfolio-analytics", address],
+    queryFn: async () => {
+      const res = await fetch(`/api/portfolio/${address}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json() as Promise<{
+        analytics: {
+          realizedPnl: number; volume: number; tradeCount: number; winRate: number;
+          totalDeposited: number; totalWithdrawn: number; totalFundingPaid: number;
+          totalFeesPaid: number; liquidationCount: number;
+        } | null;
+      }>;
+    },
+    enabled: !!address && connected,
+    refetchInterval: 15_000,
+  });
+
   const equity = health ? amountToHuman(health.equity) : 0;
   const usdcBal = balance !== undefined ? amountToHuman(balance) : 0;
-  const pnl = positions.reduce((acc, p) => {
+  const unrealizedPnl = positions.reduce((acc, p) => {
     const mp = markPrices[p.marketId];
     return mp ? acc + amountToHuman(calcUnrealizedPnl(p.isLong, p.size, p.entryPrice, mp)) : acc;
   }, 0);
+  const a = portfolio?.analytics;
+  const realizedPnl = a?.realizedPnl ?? 0;
+  const pnl = realizedPnl + unrealizedPnl;
+  const volume = a?.volume ?? 0;
+  const winRate = a?.winRate ?? 0;
 
   const stats: [string, string, string?][] = [
-    ["PNL", usd(pnl), pnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"],
-    ["Volume", usd(0)],
-    ["Max Drawdown", "0.00%"],
+    ["PNL (Realized + Unrealized)", usd(pnl), pnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"],
+    ["Realized PNL", usd(realizedPnl), realizedPnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"],
+    ["Volume", usd(volume)],
+    ["Win Rate", `${(winRate * 100).toFixed(1)}%`],
     ["Total Equity", usd(equity)],
-    ["Perps Account Equity", usd(equity)],
-    ["Spot Account Equity", usd(0)],
-    ["Earn Balance", usd(0)],
+    ["Fees Paid", usd(a?.totalFeesPaid ?? 0)],
+    ["Net Funding", usd(a?.totalFundingPaid ?? 0)],
   ];
 
   const actionPill = "px-4 py-[9px] rounded-[8px] text-[13px] border border-[#1f232a] text-[#8a8f97] hover:text-[#e6e6e6] hover:border-[#2a2f37] transition-colors whitespace-nowrap";

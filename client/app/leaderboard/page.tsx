@@ -1,7 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { TopNav } from "@/components/common/TopNav";
+import { shortenAddress } from "@/lib/format";
 
 const CaretIcon = () => (
   <svg width={10} height={10} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -9,10 +11,61 @@ const CaretIcon = () => (
   </svg>
 );
 
-const COLS = ["Rank", "Trader", "Account Value", "PNL (30D)", "ROI (30D)", "Volume (30D)"];
+type Period = "DAY" | "WEEK" | "MONTH" | "ALL";
+const PERIOD_LABEL: Record<Period, string> = { DAY: "24H", WEEK: "7D", MONTH: "30D", ALL: "All" };
+
+interface Trader {
+  rank: number;
+  address: string;
+  pnl: number;
+  volume: number;
+  roi: number;
+  winRate: number;
+  tradeCount: number;
+  liquidations: number;
+  accountValue: number;
+}
+interface LeaderboardResp {
+  period: Period;
+  metric: string;
+  total: number;
+  traders: Trader[];
+}
+
+const fmtUsd = (v: number) =>
+  (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 export default function LeaderboardPage() {
   const [search, setSearch] = useState("");
+  const [period, setPeriod] = useState<Period>("MONTH");
+  const [page, setPage] = useState(0);
+  const [periodOpen, setPeriodOpen] = useState(false);
+  const pageSize = 10;
+
+  const { data, isLoading, isError } = useQuery<LeaderboardResp>({
+    queryKey: ["leaderboard", period, page, search],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        period,
+        metric: "pnl",
+        limit: String(pageSize),
+        offset: String(page * pageSize),
+      });
+      if (search.trim()) params.set("search", search.trim());
+      const res = await fetch(`/api/leaderboard?${params}`, { cache: "no-store" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    refetchInterval: 15_000,
+    placeholderData: keepPreviousData,
+  });
+
+  const traders = data?.traders ?? [];
+  const total = data?.total ?? 0;
+  const from = total === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min((page + 1) * pageSize, total);
+  const label = PERIOD_LABEL[period];
+  const COLS = ["Rank", "Trader", "Account Value", `PNL (${label})`, `ROI (${label})`, `Volume (${label})`];
 
   return (
     <div className="min-h-screen bg-black text-[#e6e6e6]" style={{ fontFamily: "var(--font-poppins), 'Poppins', system-ui, sans-serif" }}>
@@ -33,47 +86,96 @@ export default function LeaderboardPage() {
               </svg>
               <input
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setPage(0); }}
                 placeholder="Search by wallet address…"
                 className="w-full rounded-[8px] border border-[#1f232a] bg-[#14171c] pl-9 pr-3 py-[10px] text-[13px] text-[#e6e6e6] placeholder:text-[#5a5f66] outline-none focus:border-[#2a2f37]"
               />
             </div>
-            <button className="flex items-center gap-2 rounded-[8px] border border-[#1f232a] bg-[#14171c] px-3 py-[10px] text-[12.5px] text-[#e6e6e6] hover:border-[#2a2f37] transition-colors">
-              30D <CaretIcon />
-            </button>
+            <div className="relative">
+              <button
+                onClick={() => setPeriodOpen((o) => !o)}
+                className="flex items-center gap-2 rounded-[8px] border border-[#1f232a] bg-[#14171c] px-3 py-[10px] text-[12.5px] text-[#e6e6e6] hover:border-[#2a2f37] transition-colors"
+              >
+                {label} <CaretIcon />
+              </button>
+              {periodOpen && (
+                <div className="absolute right-0 mt-1 z-10 rounded-[8px] border border-[#1f232a] bg-[#14171c] overflow-hidden">
+                  {(Object.keys(PERIOD_LABEL) as Period[]).map((p) => (
+                    <button
+                      key={p}
+                      onClick={() => { setPeriod(p); setPage(0); setPeriodOpen(false); }}
+                      className={`block w-full text-left px-4 py-2 text-[12.5px] hover:bg-[#1f232a] ${p === period ? "text-[#f7931a]" : "text-[#e6e6e6]"}`}
+                    >
+                      {PERIOD_LABEL[p]}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Header row */}
           <div className="grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-3 text-[12px] text-[#8a8f97] border-b border-[#1f232a]">
             {COLS.map((c, i) => (
-              <span key={c} className={`${i >= 2 ? "" : ""} ${i === 3 ? "flex items-center gap-1" : ""}`}>
-                {c}
-                {i === 3 && <CaretIcon />}
-              </span>
+              <span key={c} className={i >= 2 ? "text-right" : ""}>{c}</span>
             ))}
           </div>
 
-          {/* Body — no leaderboard data source on this network */}
-          <div className="flex flex-col items-center justify-center gap-2 py-16 text-[13px] text-[#5a6585]">
-            <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-              <path d="M4 19V5M10 19V9M16 19v-6M22 19V3" />
-            </svg>
-            <span className="text-[#8a8f97]">Leaderboard rankings aren&rsquo;t available on this network yet.</span>
-            <span className="text-[12px] text-[#5a5f66]">Once the indexer publishes trader stats, they&rsquo;ll appear here.</span>
-          </div>
+          {/* Body */}
+          {isLoading ? (
+            <div className="flex flex-col gap-2 p-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-9 rounded bg-[#14171c] animate-pulse" />
+              ))}
+            </div>
+          ) : isError ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-[13px] text-[#e34c4c]">
+              Failed to load leaderboard. Retrying…
+            </div>
+          ) : traders.length === 0 ? (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-[13px] text-[#5a6585]">
+              <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <path d="M4 19V5M10 19V9M16 19v-6M22 19V3" />
+              </svg>
+              <span className="text-[#8a8f97]">No traders match this filter yet.</span>
+              <span className="text-[12px] text-[#5a5f66]">Trade activity feeds the board as fills settle.</span>
+            </div>
+          ) : (
+            traders.map((t) => (
+              <div
+                key={t.address}
+                className="grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-[14px] text-[13px] border-b border-[#1f232a]/60 hover:bg-white/[0.02] transition-colors items-center"
+              >
+                <span className="text-[#8a8f97] font-semibold">#{t.rank}</span>
+                <span className="font-mono text-[#e6e6e6]">{shortenAddress(t.address)}</span>
+                <span className="text-right text-[#e6e6e6]">{fmtUsd(t.accountValue)}</span>
+                <span className={`text-right font-semibold ${t.pnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"}`}>
+                  {t.pnl >= 0 ? "+" : ""}{fmtUsd(t.pnl)}
+                </span>
+                <span className={`text-right ${t.roi >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"}`}>
+                  {(t.roi * 100).toFixed(2)}%
+                </span>
+                <span className="text-right text-[#e6e6e6]">{fmtUsd(t.volume)}</span>
+              </div>
+            ))
+          )}
 
           {/* Pagination */}
           <div className="flex items-center justify-end gap-4 px-4 py-3 border-t border-[#1f232a] text-[12.5px] text-[#8a8f97]">
-            <span className="flex items-center gap-2">
-              Rows per page:
-              <span className="flex items-center gap-1 text-[#e6e6e6]">10 <CaretIcon /></span>
-            </span>
-            <span className="tabular">0–0 of 0</span>
+            <span className="tabular">{from}–{to} of {total}</span>
             <div className="flex items-center gap-1">
-              <button disabled className="w-7 h-7 grid place-items-center rounded-[6px] text-[#3a3f47]">
+              <button
+                disabled={page === 0}
+                onClick={() => setPage((p) => Math.max(0, p - 1))}
+                className="w-7 h-7 grid place-items-center rounded-[6px] disabled:text-[#3a3f47] text-[#e6e6e6] hover:bg-[#1f232a] disabled:hover:bg-transparent"
+              >
                 <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
               </button>
-              <button disabled className="w-7 h-7 grid place-items-center rounded-[6px] text-[#3a3f47]">
+              <button
+                disabled={to >= total}
+                onClick={() => setPage((p) => p + 1)}
+                className="w-7 h-7 grid place-items-center rounded-[6px] disabled:text-[#3a3f47] text-[#e6e6e6] hover:bg-[#1f232a] disabled:hover:bg-transparent"
+              >
                 <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
               </button>
             </div>

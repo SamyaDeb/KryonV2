@@ -1,0 +1,89 @@
+import type { Config } from "@docusaurus/types";
+import type * as Preset from "@docusaurus/preset-classic";
+import { themes as prismThemes } from "prism-react-renderer";
+
+const config: Config = {
+  title: "Kryon Protocol",
+  tagline: "Decentralised perpetual futures on Stellar / Soroban",
+  favicon: "img/favicon.svg",
+
+  url: "https://docs.kryon.xyz",
+  baseUrl: "/",
+  organizationName: "kryon",
+  projectName: "kryon-protocol",
+
+  onBrokenLinks: "warn",
+
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: "warn",
+    },
+  },
+
+  i18n: { defaultLocale: "en", locales: ["en"] },
+
+  presets: [
+    [
+      "classic",
+      {
+        docs: {
+          routeBasePath: "/",
+          sidebarPath: "./sidebars.ts",
+        },
+        blog: false,
+        theme: {
+          customCss: "./src/css/custom.css",
+        },
+      } satisfies Preset.Options,
+    ],
+  ],
+
+  themeConfig: {
+    colorMode: { defaultMode: "dark", respectPrefersColorScheme: true },
+    navbar: {
+      title: "Kryon",
+      logo: { alt: "Kryon", src: "img/logo.png", width: 32, height: 32 },
+      items: [
+        { type: "docSidebar", sidebarId: "docs", position: "left", label: "Documentation" },
+        { href: "https://github.com/SamyaDeb/KryonV2", label: "GitHub", position: "right" },
+      ],
+    },
+    footer: {
+      style: "dark",
+      links: [
+        {
+          title: "Protocol",
+          items: [
+            { label: "Architecture", to: "/architecture/protocol" },
+            { label: "Soroban Contracts", to: "/architecture/contracts" },
+            { label: "Trading Lifecycle", to: "/trading/lifecycle" },
+          ],
+        },
+        {
+          title: "Build",
+          items: [
+            { label: "Local Development", to: "/operations/local-dev" },
+            { label: "REST API", to: "/api/rest" },
+            { label: "WebSocket Events", to: "/api/websocket" },
+          ],
+        },
+        {
+          title: "Operate",
+          items: [
+            { label: "Deployment", to: "/operations/deployment" },
+            { label: "Security", to: "/security" },
+            { label: "Mainnet Readiness", to: "/mainnet-readiness" },
+          ],
+        },
+      ],
+      copyright: `Kryon Protocol — built on Stellar / Soroban.`,
+    },
+    prism: {
+      theme: prismThemes.github,
+      darkTheme: prismThemes.dracula,
+      additionalLanguages: ["rust", "toml", "bash", "sql"],
+    },
+  } satisfies Preset.ThemeConfig,
+};
+
+export default config;
