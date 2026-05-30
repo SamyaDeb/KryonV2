@@ -17,10 +17,21 @@
  *   or: npm run dev:matcher
  */
 
-import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { neon, neonConfig, type NeonQueryFunction } from "@neondatabase/serverless";
+
+// Keep fetch connections alive — prevents "fetch failed" on Neon serverless
+// after idle periods by re-establishing the HTTP connection as needed.
+neonConfig.fetchConnectionCache = true;
 import { submitSettleFillDirect } from "../lib/stellar/settlement";
+import { getPositions } from "../lib/stellar/contracts";
+import { recordFillPnl, type RawPos } from "../lib/stats";
 
 type Sql = NeonQueryFunction<false, false>;
+
+// Narrow on-chain RawPosition[] to the fields the stats math needs.
+function toRawPos(rows: { marketId: number; isLong: boolean; size: bigint; entryPrice: bigint }[]): RawPos[] {
+  return rows.map((p) => ({ marketId: p.marketId, isLong: p.isLong, size: p.size, entryPrice: p.entryPrice }));
+}
 
 const POLL_INTERVAL_MS = 1_000;
 const NETWORK = "testnet";
@@ -276,14 +287,45 @@ async function persistFill(sql: Sql, match: MatchResult): Promise<boolean> {
   }
 }
 
+// Undo a persisted fill when on-chain settlement permanently fails, so the
+// orders return to the book and get re-matched on a later tick. Keeps the DB
+// orderbook/trade feed consistent with on-chain truth.
+async function rollbackFill(sql: Sql, match: MatchResult): Promise<void> {
+  const { maker, taker, fillSize } = match;
+  const txHash = pseudoTxHash(maker, taker, fillSize);
+  try {
+    await sql`DELETE FROM "Fill" WHERE network = ${NETWORK} AND "txHash" = ${txHash}`;
+    await sql`
+      UPDATE "Order"
+      SET "filledSize" = GREATEST(0, ("filledSize"::numeric - ${fillSize.toString()}::numeric))::text,
+          "updatedAt"  = NOW()
+      WHERE id = ${maker.id}
+    `;
+    await sql`
+      UPDATE "Order"
+      SET "filledSize" = GREATEST(0, ("filledSize"::numeric - ${fillSize.toString()}::numeric))::text,
+          "updatedAt"  = NOW()
+      WHERE id = ${taker.id}
+    `;
+    process.stderr.write(`  ↩ rolled back fill — orders returned to book for retry\n`);
+  } catch (e) {
+    process.stderr.write(`  ✗ rollback failed: ${(e as Error).message?.slice(0, 100)}\n`);
+  }
+}
+
 // ── Submit on-chain settlement after a fill ───────────────────────────────────
 // settle_fill uses SOROBAN_CREDENTIALS_SOURCE_ACCOUNT — only the fee-payer's
 // transaction signature is required. No individual Freighter auth entries needed.
 
-async function executeSettlement(match: MatchResult): Promise<void> {
-  const feePayerSecret = process.env.ORACLE_PUBLISHER_SECRET;
-  if (!feePayerSecret) return;
+async function executeSettlement(match: MatchResult): Promise<boolean> {
+  // Use the dedicated operator key (decoupled from the oracle keeper to avoid
+  // sequence-number collisions). Falls back to the oracle key if unset.
+  const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET ?? process.env.ORACLE_PUBLISHER_SECRET;
+  if (!feePayerSecret) return false;
 
+  // The gateway now uses a trusted-operator auth model: the fee-payer (operator)
+  // signs as source account and settle_fill executes immediately on-chain.
+  // No maker/taker signatures required — fully automatic settlement.
   const result = await submitSettleFillDirect({
     maker: {
       owner:      match.maker.owner,
@@ -311,10 +353,11 @@ async function executeSettlement(match: MatchResult): Promise<void> {
   });
 
   if ("error" in result) {
-    process.stderr.write(`  ✗ settlement failed: ${result.error.slice(0, 100)}\n`);
-  } else {
-    process.stdout.write(`  ✓ settled on-chain: ${result.hash}\n`);
+    process.stderr.write(`  ✗ settlement failed: ${result.error}\n`);
+    return false;
   }
+  process.stdout.write(`  ✓ settled on-chain: ${result.hash}\n`);
+  return true;
 }
 
 // ── Format helpers ────────────────────────────────────────────────────────────
@@ -341,7 +384,6 @@ async function tick(sql: Sql) {
 
     const matches = matchAll(limitOrders, marketOrders);
     for (const match of matches) {
-      const fillHash = pseudoTxHash(match.maker, match.taker, match.fillSize);
       const ok = await persistFill(sql, match);
       if (ok) {
         totalFills++;
@@ -351,10 +393,42 @@ async function tick(sql: Sql) {
           `[${time}] ${market.symbol} ${orderType} fill: ${fmtSize(match.fillSize)} @ $${fmtPrice(match.fillPrice)}` +
           `  maker=${match.maker.owner.slice(0, 8)} taker=${match.taker.owner.slice(0, 8)}\n`
         );
-        // Submit on-chain settlement immediately — fee-payer signs, no user auth needed
-        executeSettlement(match).catch((e: unknown) => {
+        // Capture each side's positions BEFORE settlement so we can book
+        // realized PnL on the portion that closes existing exposure.
+        let makerBefore: RawPos[] = [];
+        let takerBefore: RawPos[] = [];
+        try {
+          [makerBefore, takerBefore] = await Promise.all([
+            getPositions(match.maker.owner).then(toRawPos),
+            getPositions(match.taker.owner).then(toRawPos),
+          ]);
+        } catch { /* best-effort — stats only */ }
+
+        // Settle on-chain (operator-signed, automatic). Await so we keep the DB
+        // consistent: if settlement permanently fails, roll the fill back so the
+        // orders return to the book and retry on a later tick.
+        try {
+          const settled = await executeSettlement(match);
+          if (!settled) {
+            await rollbackFill(sql, match);
+          } else {
+            // Settlement confirmed — record realized PnL + fee events for stats.
+            await recordFillPnl(sql as never, {
+              marketId: match.maker.marketId,
+              txHash: pseudoTxHash(match.maker, match.taker, match.fillSize),
+              ledger: 0,
+              fillSize: match.fillSize,
+              fillPrice: match.fillPrice,
+              maker: { address: match.maker.owner, isLong: match.maker.isLong, positionsBefore: makerBefore, fee: 0n },
+              taker: { address: match.taker.owner, isLong: match.taker.isLong, positionsBefore: takerBefore, fee: 0n },
+            }).catch((e: unknown) =>
+              process.stderr.write(`  ⚠ stats record failed: ${(e as Error).message?.slice(0, 80)}\n`)
+            );
+          }
+        } catch (e: unknown) {
           process.stderr.write(`  ✗ executeSettlement: ${(e as Error).message?.slice(0, 80)}\n`);
-        });
+          await rollbackFill(sql, match);
+        }
       }
     }
   }
@@ -373,7 +447,7 @@ async function run() {
   console.log("✓ Matcher service starting");
   console.log(`  Markets  : ${MARKETS.map((m) => m.symbol).join(", ")}`);
   console.log(`  Interval : ${POLL_INTERVAL_MS}ms`);
-  console.log(`  Fill type: off-chain DB fills (on-chain settlement requires dual Freighter auth)`);
+  console.log(`  Fill type: off-chain match + automatic on-chain settlement (operator-signed)`);
   console.log("");
 
   // Print orderbook summary on first tick
@@ -388,13 +462,25 @@ async function run() {
   }
   console.log("");
 
+  let consecutiveErrors = 0;
+
   // Sequential loop — never overlap ticks, avoids fill race conditions
   while (true) {
     try {
       await tick(sql);
+      consecutiveErrors = 0;
     } catch (e: unknown) {
+      consecutiveErrors++;
       const msg = e instanceof Error ? e.message : String(e);
       process.stderr.write(`  ✗ tick: ${msg.slice(0, 100)}\n`);
+
+      // On repeated DB errors, recreate the neon client (clears any stale state)
+      if (consecutiveErrors >= 3) {
+        process.stderr.write(`  ⟳ recreating DB connection after ${consecutiveErrors} errors\n`);
+        try { (sql as any)?.end?.(); } catch { /* ignore */ }
+        Object.assign(sql, neon(dbUrl));
+        consecutiveErrors = 0;
+      }
     }
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }

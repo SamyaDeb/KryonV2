@@ -153,6 +153,9 @@ async function run() {
   console.log(`  Markets  : ${MARKETS.map((m) => m.symbol).join(", ")}`);
   console.log(`  Interval : ${POLL_INTERVAL_MS / 1000}s`);
 
+  const { runAggregation } = await import("./stats-aggregator");
+  let tickCount = 0;
+
   async function tick() {
     const now = new Date().toISOString().slice(11, 19);
     process.stdout.write(`[${now}] polling contracts...\n`);
@@ -161,6 +164,15 @@ async function run() {
         process.stdout.write(`  ✗ market ${market.id}: ${e.message?.slice(0, 80)}\n`);
       });
     }
+
+    // Roll leaderboard/portfolio aggregates roughly every ~30s (every 6th tick
+    // at the default 5s cadence) so stats stay fresh without hammering the DB.
+    if (tickCount % 6 === 0) {
+      await runAggregation(sql as never)
+        .then((r) => process.stdout.write(`  ↳ stats: ${r.stats} trader rows, ${r.analytics} analytics\n`))
+        .catch((e: Error) => process.stdout.write(`  ✗ stats aggregation: ${e.message?.slice(0, 80)}\n`));
+    }
+    tickCount++;
   }
 
   await tick();

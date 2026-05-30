@@ -134,39 +134,55 @@ export async function simulateSettleFill(fill: {
       return null;
     }
 
-    const success = sim as sorobanRpc.Api.SimulateTransactionSuccessResponse;
-    const authEntries = success.result?.auth ?? [];
+    // Get current ledger to set a valid signatureExpirationLedger on auth entries.
+    // assembleTransaction does NOT populate this field — Freighter rejects entries with 0.
+    const latestLedger = await server.getLatestLedger();
+    const expirationLedger = latestLedger.sequence + 100; // ~8 minutes at 5s/ledger
 
-    if (authEntries.length < 2) {
-      console.error(`settle_fill sim: expected 2 auth entries, got ${authEntries.length}`);
+    const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
+
+    // Extract auth entries from assembled tx XDR
+    const assembledEntries: xdr.SorobanAuthorizationEntry[] =
+      assembled.toEnvelope().v1().tx().operations()[0]
+        ?.body().invokeHostFunctionOp().auth() ?? [];
+
+    if (assembledEntries.length < 2) {
+      console.error(`settle_fill: expected 2 auth entries, got ${assembledEntries.length}`);
       return null;
     }
 
-    // Determine which entry belongs to maker vs taker by inspecting the
-    // credentials address field
+    // Set signatureExpirationLedger on every address-type entry
+    for (const entry of assembledEntries) {
+      try {
+        const creds = entry.credentials();
+        if (creds.switch().name === "sorobanCredentialsAddress") {
+          creds.address().signatureExpirationLedger(expirationLedger);
+        }
+      } catch { /* skip */ }
+    }
+
+    if (assembledEntries.length < 2) {
+      console.error(`settle_fill: expected 2 auth entries in assembled tx, got ${assembledEntries.length}`);
+      return null;
+    }
+
+    // Identify maker vs taker entry by address
     let makerEntry: xdr.SorobanAuthorizationEntry | null = null;
     let takerEntry: xdr.SorobanAuthorizationEntry | null = null;
 
-    for (const entry of authEntries) {
+    for (const entry of assembledEntries) {
       try {
         const creds = entry.credentials();
         if (creds.switch().name !== "sorobanCredentialsAddress") continue;
-        const addr = Address.fromScAddress(
-          creds.address().address()
-        ).toString();
+        const addr = Address.fromScAddress(creds.address().address()).toString();
         if (addr === fill.maker.owner) makerEntry = entry;
         else if (addr === fill.taker.owner) takerEntry = entry;
       } catch { /* skip */ }
     }
 
-    if (!makerEntry || !takerEntry) {
-      // Fallback: assign by position
-      makerEntry = authEntries[0];
-      takerEntry = authEntries[1];
-    }
-
-    // Assemble the tx to get the correct soroban resource fee + footprint
-    const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
+    // Fallback: assign by position
+    if (!makerEntry) makerEntry = assembledEntries[0];
+    if (!takerEntry) takerEntry = assembledEntries[1];
 
     return {
       fillHash:       fill.fillHash,
@@ -174,7 +190,7 @@ export async function simulateSettleFill(fill: {
       takerAddress:   fill.taker.owner,
       makerAuthXdr:   makerEntry.toXDR("base64"),
       takerAuthXdr:   takerEntry.toXDR("base64"),
-      assembledTxXdr: assembled.toXDR(),
+      assembledTxXdr: assembled.toEnvelope().toXDR("base64"),
       fillPrice:      fill.fillPrice.toString(),
       fillSize:       fill.fillSize.toString(),
       marketId:       fill.maker.marketId,
@@ -206,41 +222,90 @@ export async function submitSettleFillDirect(fill: {
   fillPrice: bigint;
   feePayerSecret: string;
 }): Promise<{ hash: string } | { error: string }> {
-  try {
-    const server  = new sorobanRpc.Server(NETWORK.rpcUrl);
-    const feeKp   = Keypair.fromSecret(fill.feePayerSecret);
-    const account = await server.getAccount(feeKp.publicKey());
-    const contract = new Contract(CONTRACTS.orderGateway);
+  const server = new sorobanRpc.Server(NETWORK.rpcUrl);
+  const feeKp  = Keypair.fromSecret(fill.feePayerSecret);
+  const contract = new Contract(CONTRACTS.orderGateway);
+  const fillArg = matchedFillToScVal(fill);
 
-    const fillArg = matchedFillToScVal(fill);
+  // The operator account is shared with the oracle keeper, so sequence-number
+  // collisions (tx_bad_seq) are expected under concurrency. Refetch the account
+  // and retry a few times when that happens.
+  const MAX_ATTEMPTS = 5;
+  let lastErr = "unknown";
 
-    const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK.passphrase })
-      .addOperation(contract.call("settle_fill", fillArg))
-      .setTimeout(60)
-      .build();
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      // Refetch account each attempt to get a fresh sequence number
+      const account = await server.getAccount(feeKp.publicKey());
 
-    const sim = await server.simulateTransaction(tx);
-    if (sorobanRpc.Api.isSimulationError(sim)) {
-      const errMsg = (sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error ?? "sim failed";
-      return { error: errMsg.slice(0, 200) };
+      const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK.passphrase })
+        .addOperation(contract.call("settle_fill", fillArg))
+        .setTimeout(60)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+      if (sorobanRpc.Api.isSimulationError(sim)) {
+        // Simulation errors are deterministic — no point retrying
+        const errMsg = (sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error ?? "sim failed";
+        return { error: `sim: ${errMsg}` };
+      }
+
+      const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
+      assembled.sign(feeKp);
+
+      const send = await server.sendTransaction(assembled);
+      if (send.status === "ERROR") {
+        const errXdr = send.errorResult?.toXDR("base64") ?? "submit error";
+        const code = send.errorResult?.result().switch().name ?? "";
+        if (code === "txBadSeq") {
+          lastErr = "tx_bad_seq";
+          await new Promise((r) => setTimeout(r, 500 + attempt * 500));
+          continue; // retry with fresh sequence
+        }
+        return { error: errXdr };
+      }
+
+      // Poll the SAME tx hash. On timeout we do NOT resubmit (that risks a
+      // double-settle if the tx lands late) — we return an error and let the
+      // matcher roll the fill back for a clean re-match.
+      for (let i = 0; i < 45; i++) {
+        await new Promise((r) => setTimeout(r, 1000));
+        const poll = await server.getTransaction(send.hash);
+        if (poll.status === "SUCCESS") return { hash: send.hash };
+        if (poll.status === "FAILED") {
+          const p = poll as any;
+          const envelope = p.resultXdr;
+          let detail = "tx failed on-chain";
+          try {
+            if (typeof envelope === "string") {
+              const { xdr: xdrLib } = await import("@stellar/stellar-sdk");
+              const result = xdrLib.TransactionResult.fromXDR(envelope, "base64");
+              const txCode = result.result().switch().name;
+              if (txCode === "txBadSeq") { detail = "tx_bad_seq"; }
+              else {
+                const inner = result.result().results()?.[0]?.tr()?.invokeHostFunctionResult();
+                detail = inner ? `contract error: ${inner.switch().name}` : txCode;
+              }
+            }
+          } catch {
+            detail = `tx failed — raw: ${JSON.stringify(p).slice(0, 300)}`;
+          }
+          if (detail === "tx_bad_seq") {
+            lastErr = "tx_bad_seq";
+            await new Promise((r) => setTimeout(r, 500 + attempt * 500));
+            break; // safe to retry: a bad-seq tx never executed
+          }
+          return { error: detail };
+        }
+      }
+      // Confirmation timeout — terminal (no resubmit to avoid double-settle).
+      return { error: "confirmation timeout" };
+    } catch (e) {
+      const msg = e instanceof Error ? (e.message || e.stack || String(e)) : JSON.stringify(e);
+      lastErr = (msg || "unknown").slice(0, 250);
+      process.stderr.write(`  ⟳ settle attempt ${attempt + 1}/${MAX_ATTEMPTS}: ${lastErr}\n`);
+      await new Promise((r) => setTimeout(r, 500 + attempt * 500));
     }
-
-    const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
-    assembled.sign(feeKp);
-
-    const send = await server.sendTransaction(assembled);
-    if (send.status === "ERROR") {
-      return { error: send.errorResult?.toXDR("base64") ?? "submit error" };
-    }
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const poll = await server.getTransaction(send.hash);
-      if (poll.status === "SUCCESS") return { hash: send.hash };
-      if (poll.status === "FAILED") return { error: "tx failed on-chain" };
-    }
-    return { error: "timeout waiting for confirmation" };
-  } catch (e) {
-    return { error: (e as Error).message?.slice(0, 200) ?? "unknown" };
   }
+  return { error: `${lastErr} (after ${MAX_ATTEMPTS} attempts)` };
 }
