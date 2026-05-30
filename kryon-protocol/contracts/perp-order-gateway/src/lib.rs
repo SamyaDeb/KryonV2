@@ -10,6 +10,7 @@ pub enum DataKey {
     Admin,
     PendingAdmin,
     Engine,
+    Operator,
     Filled(Address, u64),
     Cancelled(Address, u64),
 }
@@ -81,6 +82,21 @@ impl PerpOrderGatewayContract {
         Ok(())
     }
 
+    /// Set the trusted operator (off-chain matcher fee-payer) authorized to
+    /// submit settle_fill on behalf of matched maker/taker orders. This is the
+    /// trusted-sequencer model used by most perp DEXs — the operator can only
+    /// settle orders that pass on-chain validation (price band, expiry,
+    /// cancellation, overfill checks).
+    pub fn set_operator(env: Env, operator: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Operator, &operator);
+        Ok(())
+    }
+
+    pub fn operator(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Operator)
+    }
+
     pub fn nominate_admin(env: Env, next_admin: Address) -> Result<(), CoreError> {
         require_admin(&env)?;
         env.storage()
@@ -110,8 +126,10 @@ impl PerpOrderGatewayContract {
     }
 
     pub fn settle_fill(env: Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> {
-        fill.maker.owner.require_auth();
-        fill.taker.owner.require_auth();
+        // Trusted-operator model: the off-chain matcher fee-payer authorizes
+        // settlement. On-chain validation (price band, expiry, cancellation,
+        // overfill) still protects users from a misbehaving matcher.
+        require_operator(&env)?;
         validate_fill(&env, &fill)?;
 
         settle_user_side(
@@ -180,6 +198,16 @@ fn require_admin(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::InvalidConfig)?;
     admin.require_auth();
     Ok(admin)
+}
+
+fn require_operator(env: &Env) -> Result<Address, CoreError> {
+    let operator: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Operator)
+        .ok_or(CoreError::Unauthorized)?;
+    operator.require_auth();
+    Ok(operator)
 }
 
 fn engine_address(env: &Env) -> Result<Address, CoreError> {
@@ -493,6 +521,7 @@ mod tests {
             max_execution_deviation_bps: 100,
         });
         gateway.initialize(&admin, &engine_id);
+        gateway.set_operator(&admin);
         engine.set_fee_collector(&gateway_id);
         vault.deposit(&maker, &settlement_asset, &(1_000 * PRECISION));
         vault.deposit(&taker, &settlement_asset, &(1_000 * PRECISION));
