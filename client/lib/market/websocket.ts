@@ -1,7 +1,14 @@
 "use client";
 
-import { MATCHER_URL } from "@/config";
 import type { OrderBook, RecentTrade } from "@/lib/market/matcher";
+
+// Realtime streaming is delivered by a dedicated WebSocket service, configured
+// via NEXT_PUBLIC_WS_URL (e.g. wss://stream.kryon.xyz). When unset — the
+// default in this deployment — the client stays dormant and the app sources
+// realtime data from resilient REST polling in MarketDataProvider. This keeps
+// the WS layer fully pluggable without spamming reconnects at a non-existent
+// endpoint.
+const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,8 +42,9 @@ let onStatus: WsStatusHandler | null = null;
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getWsUrl(): string | null {
-  if (!MATCHER_URL) return null;
-  return MATCHER_URL.replace(/^https?/, (m) => (m === "https" ? "wss" : "ws")) + "/ws";
+  // Only connect when an explicit streaming URL is configured. No fallback to
+  // the REST origin — that endpoint does not speak WebSocket.
+  return WS_URL || null;
 }
 
 function send(payload: object) {
@@ -147,6 +155,8 @@ export function wsSetHandlers(
 }
 
 export function wsSubscribe(marketId: number) {
+  // No streaming server configured → stay on REST polling, don't attempt to connect.
+  if (!getWsUrl()) return;
   const channels = [`orderbook:${marketId}`, `trades:${marketId}`];
   channels.forEach((c) => subscribedChannels.add(c));
   if (ws?.readyState === WebSocket.OPEN) {

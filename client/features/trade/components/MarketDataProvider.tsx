@@ -60,16 +60,21 @@ export function MarketDataProvider({ marketId, children }: Props) {
     const set = () => useMarketStore.getState();
 
     // ── Oracle price → Binance fallback ──────────────────────────────────────
+    // Wrapped so a failed/slow RPC never becomes an unhandled rejection on the
+    // polling interval; we degrade to the Binance price instead.
     async function pollOracle() {
-      const result = await getOraclePrice();
-      if (cancelled) return;
-      if (result && result.price > 0n) {
-        set().setMarkPrice(marketId, result.price);
-        return;
-      }
-      // Oracle keeper not running — fall back to Binance live price
-      const b = await fetchBinance24h(marketId);
-      if (!cancelled && b && b.price > 0n) set().setMarkPrice(marketId, b.price);
+      try {
+        const result = await getOraclePrice();
+        if (cancelled) return;
+        if (result && result.price > 0n) {
+          set().setMarkPrice(marketId, result.price);
+          return;
+        }
+      } catch { /* RPC failure — fall through to Binance */ }
+      try {
+        const b = await fetchBinance24h(marketId);
+        if (!cancelled && b && b.price > 0n) set().setMarkPrice(marketId, b.price);
+      } catch { /* best-effort */ }
     }
 
     // ── 24h change (Binance) ─────────────────────────────────────────────────

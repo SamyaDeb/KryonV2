@@ -8,7 +8,8 @@ import { BottomPanel } from "@/features/trade/components/BottomPanel";
 import { AccountBar } from "@/features/trade/components/AccountBar";
 import { MarketDataProvider } from "@/features/trade/components/MarketDataProvider";
 import { SettlementModal } from "@/features/trade/components/SettlementModal";
-import { TopNav, KryonMark } from "@/components/common/TopNav";
+import Image from "next/image";
+import { TopNav } from "@/components/common/TopNav";
 
 export default async function TradePage({
   params,
@@ -28,7 +29,7 @@ export default async function TradePage({
         className="flex lg:hidden h-screen w-full flex-col items-center justify-center gap-4 bg-black px-8 text-center"
         style={{ fontFamily: "var(--font-poppins), 'Poppins', system-ui, sans-serif" }}
       >
-        <KryonMark />
+        <Image src="/logo.png" alt="Kryon" width={80} height={80} className="object-contain" />
         <div className="text-[16px] font-semibold text-[#e6e6e6]">Kryon is built for larger screens</div>
         <div className="max-w-[320px] text-[13px] leading-relaxed text-[#8a8f97]">
           The trading terminal isn&rsquo;t optimized for phones yet. Open Kryon on a desktop, Mac, or a tablet in landscape.

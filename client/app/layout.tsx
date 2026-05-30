@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Poppins, Geist_Mono } from "next/font/google";
 import { Providers } from "@/components/common/Providers";
 import "./globals.css";
@@ -14,6 +14,25 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 export const metadata: Metadata = {
   title: "Kryon | Perpetuals DEX",
   description: "Decentralised perpetual futures on Stellar/Soroban — XLM-PERP",
+  applicationName: "Kryon",
+  icons: {
+    icon: [
+      { url: "/favicon.png", type: "image/png" },
+      { url: "/favicon.ico", sizes: "48x48" },
+    ],
+    apple: { url: "/apple-icon.png", sizes: "180x180", type: "image/png" },
+  },
+  openGraph: {
+    title: "Kryon | Perpetuals DEX",
+    description: "Decentralised perpetual futures on Stellar/Soroban",
+    siteName: "Kryon",
+    images: [{ url: "/icon-512.png", width: 512, height: 512 }],
+    type: "website",
+  },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#0f1217",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

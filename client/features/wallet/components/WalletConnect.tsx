@@ -21,6 +21,7 @@ export function WalletConnect() {
     setConnected,
     setConnecting,
     setWrongNetwork,
+    disconnect,
   } = useWalletStore();
 
   useEffect(() => {
@@ -73,13 +74,9 @@ export function WalletConnect() {
     );
   }
 
-  async function copyAddress() {
-    try {
-      await navigator.clipboard.writeText(address!);
-      toast.success("Address copied");
-    } catch {
-      toast.error("Could not copy address");
-    }
+  function handleDisconnect() {
+    disconnect();
+    toast.success("Wallet disconnected");
   }
 
   return (
@@ -90,11 +87,11 @@ export function WalletConnect() {
         </span>
       )}
       <button
-        onClick={copyAddress}
-        title="Click to copy address"
-        className="flex items-center bg-[#14171c] border border-[#1f232a] rounded-[7px] px-[18px] py-[8px] hover:border-[#2a2f37] transition-colors"
+        onClick={handleDisconnect}
+        title="Click to disconnect"
+        className="flex items-center bg-[#14171c] border border-[#1f232a] rounded-[7px] px-[18px] py-[8px] hover:border-red-500/40 hover:bg-red-500/5 transition-colors group"
       >
-        <span className="text-[14px] text-[#e6e6e6] font-mono">{shortenAddress(address!)}</span>
+        <span className="text-[14px] text-[#e6e6e6] font-mono group-hover:text-red-400 transition-colors">{shortenAddress(address!)}</span>
       </button>
     </div>
   );
