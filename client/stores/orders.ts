@@ -20,8 +20,8 @@ type TrackedOrder = OrderIntent & {
 interface OrdersState {
   orders: TrackedOrder[];
   addOrder: (intent: OrderIntent) => void;
-  cancelOrder: (nonce: bigint) => void;
-  markFilled: (nonce: bigint) => void;
+  cancelOrder: (nonce: bigint, owner?: string) => void;
+  markFilled: (nonce: bigint, owner?: string) => void;
   clearCancelled: () => void;
   clearAll: () => void;
 }
@@ -34,19 +34,19 @@ export const useLocalOrders = create<OrdersState>()(
         set((s) => ({
           orders: [
             { ...intent, status: "pending" as const, addedAt: Date.now() },
-            ...s.orders.slice(0, 99),
+            ...s.orders.filter((o) => !(o.owner === intent.owner && o.nonce === intent.nonce)).slice(0, 99),
           ],
         })),
-      cancelOrder: (nonce) =>
+      cancelOrder: (nonce, owner) =>
         set((s) => ({
           orders: s.orders.map((o) =>
-            o.nonce === nonce ? { ...o, status: "cancelled" as const } : o
+            o.nonce === nonce && (!owner || o.owner === owner) ? { ...o, status: "cancelled" as const } : o
           ),
         })),
-      markFilled: (nonce) =>
+      markFilled: (nonce, owner) =>
         set((s) => ({
           orders: s.orders.map((o) =>
-            o.nonce === nonce ? { ...o, status: "filled" as const } : o
+            o.nonce === nonce && (!owner || o.owner === owner) ? { ...o, status: "filled" as const } : o
           ),
         })),
       clearCancelled: () =>

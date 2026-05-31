@@ -3,10 +3,8 @@
 
 import {
   Keypair,
-  Account,
   Contract,
   TransactionBuilder,
-  Transaction,
   Address,
   nativeToScVal,
   xdr,
@@ -199,113 +197,4 @@ export async function simulateSettleFill(fill: {
     console.error("simulateSettleFill error:", (e as Error).message?.slice(0, 200));
     return null;
   }
-}
-
-// ── Direct settlement submission (source-account auth only) ───────────────
-//
-// The order-gateway's settle_fill function uses SOROBAN_CREDENTIALS_SOURCE_ACCOUNT
-// auth, meaning only the fee-payer's transaction signature is needed.
-// No individual maker/taker Freighter auth entries are required.
-
-export async function submitSettleFillDirect(fill: {
-  maker: {
-    owner: string; marketId: number; isLong: boolean;
-    size: bigint; limitPrice: bigint; reduceOnly: boolean;
-    nonce: bigint; expiryTs: bigint;
-  };
-  taker: {
-    owner: string; marketId: number; isLong: boolean;
-    size: bigint; limitPrice: bigint; reduceOnly: boolean;
-    nonce: bigint; expiryTs: bigint;
-  };
-  fillSize: bigint;
-  fillPrice: bigint;
-  feePayerSecret: string;
-}): Promise<{ hash: string } | { error: string }> {
-  const server = new sorobanRpc.Server(NETWORK.rpcUrl);
-  const feeKp  = Keypair.fromSecret(fill.feePayerSecret);
-  const contract = new Contract(CONTRACTS.orderGateway);
-  const fillArg = matchedFillToScVal(fill);
-
-  // The operator account is shared with the oracle keeper, so sequence-number
-  // collisions (tx_bad_seq) are expected under concurrency. Refetch the account
-  // and retry a few times when that happens.
-  const MAX_ATTEMPTS = 5;
-  let lastErr = "unknown";
-
-  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    try {
-      // Refetch account each attempt to get a fresh sequence number
-      const account = await server.getAccount(feeKp.publicKey());
-
-      const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK.passphrase })
-        .addOperation(contract.call("settle_fill", fillArg))
-        .setTimeout(60)
-        .build();
-
-      const sim = await server.simulateTransaction(tx);
-      if (sorobanRpc.Api.isSimulationError(sim)) {
-        // Simulation errors are deterministic — no point retrying
-        const errMsg = (sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error ?? "sim failed";
-        return { error: `sim: ${errMsg}` };
-      }
-
-      const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
-      assembled.sign(feeKp);
-
-      const send = await server.sendTransaction(assembled);
-      if (send.status === "ERROR") {
-        const errXdr = send.errorResult?.toXDR("base64") ?? "submit error";
-        const code = send.errorResult?.result().switch().name ?? "";
-        if (code === "txBadSeq") {
-          lastErr = "tx_bad_seq";
-          await new Promise((r) => setTimeout(r, 500 + attempt * 500));
-          continue; // retry with fresh sequence
-        }
-        return { error: errXdr };
-      }
-
-      // Poll the SAME tx hash. On timeout we do NOT resubmit (that risks a
-      // double-settle if the tx lands late) — we return an error and let the
-      // matcher roll the fill back for a clean re-match.
-      for (let i = 0; i < 45; i++) {
-        await new Promise((r) => setTimeout(r, 1000));
-        const poll = await server.getTransaction(send.hash);
-        if (poll.status === "SUCCESS") return { hash: send.hash };
-        if (poll.status === "FAILED") {
-          const p = poll as any;
-          const envelope = p.resultXdr;
-          let detail = "tx failed on-chain";
-          try {
-            if (typeof envelope === "string") {
-              const { xdr: xdrLib } = await import("@stellar/stellar-sdk");
-              const result = xdrLib.TransactionResult.fromXDR(envelope, "base64");
-              const txCode = result.result().switch().name;
-              if (txCode === "txBadSeq") { detail = "tx_bad_seq"; }
-              else {
-                const inner = result.result().results()?.[0]?.tr()?.invokeHostFunctionResult();
-                detail = inner ? `contract error: ${inner.switch().name}` : txCode;
-              }
-            }
-          } catch {
-            detail = `tx failed — raw: ${JSON.stringify(p).slice(0, 300)}`;
-          }
-          if (detail === "tx_bad_seq") {
-            lastErr = "tx_bad_seq";
-            await new Promise((r) => setTimeout(r, 500 + attempt * 500));
-            break; // safe to retry: a bad-seq tx never executed
-          }
-          return { error: detail };
-        }
-      }
-      // Confirmation timeout — terminal (no resubmit to avoid double-settle).
-      return { error: "confirmation timeout" };
-    } catch (e) {
-      const msg = e instanceof Error ? (e.message || e.stack || String(e)) : JSON.stringify(e);
-      lastErr = (msg || "unknown").slice(0, 250);
-      process.stderr.write(`  ⟳ settle attempt ${attempt + 1}/${MAX_ATTEMPTS}: ${lastErr}\n`);
-      await new Promise((r) => setTimeout(r, 500 + attempt * 500));
-    }
-  }
-  return { error: `${lastErr} (after ${MAX_ATTEMPTS} attempts)` };
 }

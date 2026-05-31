@@ -38,7 +38,7 @@ export async function GET(
       LIMIT ${limit}
     `;
 
-    const trades = rows.map((r, i) => ({
+    const trades = rows.map((r) => ({
       price: (Number(r.fill_price) / PRICE_SCALE).toFixed(4),
       size:  normaliseSize(r.fill_size).toFixed(4),
       // Alternate sides when the taker direction isn't stored (E2E data).
@@ -48,7 +48,7 @@ export async function GET(
     }));
 
     return NextResponse.json(trades, { headers: { "Cache-Control": "no-store" } });
-  } catch (e) {
-    return NextResponse.json([], { status: 500, headers: { "X-Error": String(e) } });
+  } catch {
+    return NextResponse.json([], { status: 500 });
   }
 }

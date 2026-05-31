@@ -37,11 +37,11 @@ function loadScript(): Promise<void> {
   });
 }
 
-// Kryon dark palette
-const BG = "#0f1217";
-const GRID = "#161a20";
-const SCALE_LINE = "#1f232a";
-const SCALE_TEXT = "#8a8f97";
+// Kryon dark palette, matched to the order ticket surface.
+const BG = "#19191A";
+const GRID = "#25252B";
+const SCALE_LINE = "#2A2A31";
+const SCALE_TEXT = "#a3a3a3";
 const UP = "#1fae5b";
 const DOWN = "#e34c4c";
 
@@ -93,9 +93,10 @@ export const TradingViewWidget = memo(function TradingViewWidget({
           backgroundColor: BG,
           gridColor: GRID,
           toolbar_bg: BG,
+          custom_css_url: `${window.location.origin}/tradingview-overrides.css`,
           enable_publishing: false,
           allow_symbol_change: false,
-          hide_top_toolbar: false,
+          hide_top_toolbar: true,
           hide_side_toolbar: false,
           hide_legend: false,
           save_image: false,
@@ -151,22 +152,22 @@ export const TradingViewWidget = memo(function TradingViewWidget({
     <div className="relative h-full w-full overflow-hidden">
       <div ref={hostRef} className="h-full w-full" />
       {(loading || error) && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#0f1217]">
+        <div className="absolute inset-0 flex items-center justify-center bg-[#19191A]">
           {error ? (
             <div className="flex flex-col items-center gap-3">
-              <span className="text-xs font-mono text-[#8a8f97]">Chart unavailable</span>
-              <span className="max-w-[260px] text-center text-[11px] text-[#5a5f67]">{error}</span>
+              <span className="text-xs font-mono text-[#a3a3a3]">Chart unavailable</span>
+              <span className="max-w-[260px] text-center text-[11px] text-[#737373]">{error}</span>
               <button
                 onClick={() => setRetryNonce((v) => v + 1)}
-                className="rounded-[6px] bg-[#14171c] border border-[#1f232a] px-3 py-1.5 text-[11px] font-medium text-[#e6e6e6] hover:border-[#2a2f37] transition-colors"
+                className="rounded-[6px] bg-[#19191A] border border-[#334155] px-3 py-1.5 text-[11px] font-medium text-[#f5f5f5] hover:border-[#4a4a4a] transition-colors"
               >
                 Retry
               </button>
             </div>
           ) : (
             <div className="flex flex-col items-center gap-3 pointer-events-none">
-              <div className="w-5 h-5 border-2 border-[#1f232a] border-t-[#8a8f97] rounded-full animate-spin" />
-              <span className="text-[#5a5f67] text-xs font-mono">Loading chart…</span>
+              <div className="w-5 h-5 border-2 border-[#19191A] border-t-[#a3a3a3] rounded-full animate-spin" />
+              <span className="text-[#737373] text-xs font-mono">Loading chart…</span>
             </div>
           )}
         </div>

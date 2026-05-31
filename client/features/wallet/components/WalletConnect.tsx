@@ -25,13 +25,28 @@ export function WalletConnect() {
   } = useWalletStore();
 
   useEffect(() => {
-    freighterGetAddress().then((addr) => {
+    let cancelled = false;
+    async function refreshWalletState() {
+      const addr = await freighterGetAddress();
+      if (cancelled) return;
       if (addr) {
         setAddress(addr);
         setConnected(true);
-        isOnTestnet().then((ok) => setWrongNetwork(!ok));
+        const ok = await isOnTestnet();
+        if (!cancelled) setWrongNetwork(!ok);
+      } else {
+        setAddress(null);
+        setConnected(false);
+        setWrongNetwork(false);
       }
-    });
+    }
+
+    refreshWalletState();
+    const id = setInterval(refreshWalletState, 3_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [setAddress, setConnected, setWrongNetwork]);
 
   async function handleConnect() {
@@ -61,13 +76,13 @@ export function WalletConnect() {
       <button
         onClick={handleConnect}
         disabled={connecting}
-        className="px-[18px] py-[10px] rounded-[8px] text-[13.5px] font-semibold text-[#1a1205] transition-opacity disabled:opacity-50"
+        className="px-[18px] py-[10px] rounded-[8px] text-[13.5px] font-semibold text-[#19191A] transition-opacity disabled:opacity-50"
         style={{
-          background: "#f7931a",
+          background: "#f5f5f5",
           letterSpacing: ".01em",
         }}
-        onMouseOver={(e) => (e.currentTarget.style.background = "#ffa733")}
-        onMouseOut={(e) => (e.currentTarget.style.background = "#f7931a")}
+        onMouseOver={(e) => (e.currentTarget.style.background = "#e5e7eb")}
+        onMouseOut={(e) => (e.currentTarget.style.background = "#f5f5f5")}
       >
         {connecting ? "Connecting…" : "Connect Wallet"}
       </button>
@@ -89,9 +104,9 @@ export function WalletConnect() {
       <button
         onClick={handleDisconnect}
         title="Click to disconnect"
-        className="flex items-center bg-[#14171c] border border-[#1f232a] rounded-[7px] px-[18px] py-[8px] hover:border-red-500/40 hover:bg-red-500/5 transition-colors group"
+        className="flex items-center bg-[#212128] border border-[#2A2A31] rounded-[7px] px-[18px] py-[8px] hover:border-red-500/40 hover:bg-red-500/5 transition-colors group"
       >
-        <span className="text-[14px] text-[#e6e6e6] font-mono group-hover:text-red-400 transition-colors">{shortenAddress(address!)}</span>
+        <span className="text-[14px] text-[#f5f5f5] font-mono group-hover:text-red-400 transition-colors">{shortenAddress(address!)}</span>
       </button>
     </div>
   );

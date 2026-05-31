@@ -99,8 +99,9 @@ export async function simulateRead(
   contractId: string,
   method: string,
   args: xdr.ScVal[],
-  _dummySource?: string  // kept for API compat — no longer used
+  dummySource?: string
 ): Promise<xdr.ScVal | null> {
+  void dummySource;
   const server = getRpcServer();
   // Use synthetic account — simulation validates tx structure, not source existence
   const account = getSimAccount();

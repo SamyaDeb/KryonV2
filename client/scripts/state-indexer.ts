@@ -28,19 +28,15 @@ import {
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
 
 type Sql = NeonQueryFunction<false, false>;
 
-const RPC_URL = "https://soroban-testnet.stellar.org";
-const NETWORK = "Test SDF Network ; September 2015";
-
-const CONTRACTS = {
-  engine:       "CCH7M3XXFEIR72YXKBXEQ2R3UCIJR7BWYQEI5VTKLE4YMZD5RJTBJ7PW",
-  vault:        "CAZV547ZY7S5IGGMYHDQWYM2TWAZ4MEJ6FJHWIJM7VF6GGXU3EUZ5ZOS",
-  oracle:       "CDC342E2GSLQKPHNWOWYUKNMSBES2OOTRHKA7YZO77SCZEN6XDQ334MD",
-} as const;
-
-const MARKETS = [{ id: 1, symbol: "XLM-PERP" }];
+const INDEXER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
+  id: m.marketId,
+  symbol: m.symbol,
+  oracleSymbol: m.oracleSymbol,
+}));
 const POLL_INTERVAL_MS = 5_000;
 const PRICE_PRECISION = 1e18;
 
@@ -61,7 +57,7 @@ async function simulateRead(
 ): Promise<unknown | null> {
   const account = getSimAccount();
   const contract = new Contract(contractId);
-  const tx = new TransactionBuilder(account, { fee: "500000", networkPassphrase: NETWORK })
+  const tx = new TransactionBuilder(account, { fee: "500000", networkPassphrase: NETWORK.passphrase })
     .addOperation(contract.call(method, ...args))
     .setTimeout(0)
     .build();
@@ -77,20 +73,19 @@ async function simulateRead(
 async function indexMarket(
   server: sorobanRpc.Server,
   sql: Sql,
-  marketId: number
+  market: { id: number; symbol: string; oracleSymbol: string }
 ) {
   const u32 = (n: number) => nativeToScVal(n, { type: "u32" });
+  const marketId = market.id;
 
-  const [oi, fundingRaw, oraclePriceRaw] = await Promise.allSettled([
-    simulateRead(server, CONTRACTS.engine, "open_interest",      [u32(marketId)]),
+  const [fundingRaw, oraclePriceRaw] = await Promise.allSettled([
     simulateRead(server, CONTRACTS.engine, "funding_state",      [u32(marketId)]),
-    simulateRead(server, CONTRACTS.oracle, "get_price",          [
-      nativeToScVal("XLM", { type: "symbol" }),
+    simulateRead(server, CONTRACTS.oracleAdapter, "get_price",   [
+      nativeToScVal(market.oracleSymbol, { type: "symbol" }),
       xdr.ScVal.scvVoid(),
     ]),
   ]);
 
-  const oiVal = oi.status === "fulfilled" ? oi.value : null;
   const funding = fundingRaw.status === "fulfilled" ? fundingRaw.value as Record<string, unknown> | null : null;
   const oraclePrice = oraclePriceRaw.status === "fulfilled" ? oraclePriceRaw.value as Record<string, unknown> | null : null;
 
@@ -146,11 +141,12 @@ async function run() {
     process.exit(1);
   }
 
-  const server = new sorobanRpc.Server(RPC_URL);
+  const server = new sorobanRpc.Server(NETWORK.rpcUrl);
   const sql = neon(dbUrl);
 
   console.log("✓ State indexer starting");
-  console.log(`  Markets  : ${MARKETS.map((m) => m.symbol).join(", ")}`);
+  console.log(`  Network  : ${NETWORK.name}`);
+  console.log(`  Markets  : ${INDEXER_MARKETS.map((m) => m.symbol).join(", ")}`);
   console.log(`  Interval : ${POLL_INTERVAL_MS / 1000}s`);
 
   const { runAggregation } = await import("./stats-aggregator");
@@ -159,8 +155,8 @@ async function run() {
   async function tick() {
     const now = new Date().toISOString().slice(11, 19);
     process.stdout.write(`[${now}] polling contracts...\n`);
-    for (const market of MARKETS) {
-      await indexMarket(server, sql, market.id).catch((e: Error) => {
+    for (const market of INDEXER_MARKETS) {
+      await indexMarket(server, sql, market).catch((e: Error) => {
         process.stdout.write(`  ✗ market ${market.id}: ${e.message?.slice(0, 80)}\n`);
       });
     }

@@ -19,7 +19,7 @@ export function UsdcLogo({ size = 16 }: { size?: number }) {
 export function XlmLogo({ size = 16 }: { size?: number }) {
   return (
     <svg width={size} height={size} viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden>
-      <circle cx="16" cy="16" r="16" fill="#000000" />
+      <circle cx="16" cy="16" r="16" fill="#101010" />
       <path
         d="M24.7 9.3l-2.4 1.2-13 6.6a7.3 7.3 0 0 1-.1-1 7.4 7.4 0 0 1 11.2-6.4l1.4-.7.2-.1A9 9 0 0 0 7.6 17.3l-.9.5-2 1v1.8l2.9-1.4 1-.5 1.4-.7L23 11.2l1.4-.7 2.6-1.3v-1.8l-2.3 1.2z"
         fill="#ffffff"

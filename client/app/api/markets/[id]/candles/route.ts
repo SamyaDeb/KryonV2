@@ -60,7 +60,7 @@ export async function GET(
     return NextResponse.json(candles, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (e) {
-    return NextResponse.json([], { status: 500, headers: { "X-Error": String(e) } });
+  } catch {
+    return NextResponse.json([], { status: 500 });
   }
 }

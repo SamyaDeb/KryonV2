@@ -1,0 +1,68 @@
+name: mainnet-readiness
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: mainnet-readiness-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  client:
+    name: client
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run production:gate
+      - run: npx tsc --noEmit
+      - run: npm audit --audit-level=moderate
+      - run: npm run build
+
+  contracts:
+    name: contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kryon-protocol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.89.0
+        with:
+          targets: wasm32v1-none
+          components: rustfmt,clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: kryon-protocol
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace
+      - run: cargo build --workspace --release
+
+  prisma:
+    name: prisma
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: kryon-protocol
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: kryon-protocol/package-lock.json
+      - run: npm ci
+      - run: npx prisma validate
+      - run: npx prisma generate

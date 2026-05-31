@@ -6,6 +6,7 @@ import {
   requestAccess,
   signTransaction,
   signAuthEntry,
+  signMessage,
   getNetworkDetails,
 } from "@stellar/freighter-api";
 import { NETWORK_PASSPHRASE } from "./client";
@@ -60,7 +61,18 @@ export async function freighterSignAuthEntry(entryXdr: string): Promise<string> 
   return res.signedAuthEntry;
 }
 
+export async function freighterSignMessage(message: string, address?: string): Promise<string> {
+  const res = await signMessage(message, { networkPassphrase: NETWORK_PASSPHRASE, address });
+  if (res.error) throw new Error(res.error.message);
+  if (!res.signedMessage) throw new Error("Freighter returned empty signature");
+  return typeof res.signedMessage === "string"
+    ? res.signedMessage
+    : btoa(String.fromCharCode(...new Uint8Array(res.signedMessage)));
+}
+
 export async function isOnTestnet(): Promise<boolean> {
   const net = await freighterGetNetwork();
   return net?.passphrase === NETWORK_PASSPHRASE;
 }
+
+export const isOnExpectedNetwork = isOnTestnet;

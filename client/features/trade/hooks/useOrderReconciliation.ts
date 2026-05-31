@@ -23,27 +23,28 @@ export function useOrderReconciliation() {
 
   useEffect(() => {
     if (!address || !connected) return;
+    const owner = address;
     let cancelled = false;
 
     async function reconcile() {
       const pending = useLocalOrders
         .getState()
-        .orders.filter((o) => o.status === "pending");
+        .orders.filter((o) => o.status === "pending" && o.owner === owner);
       if (pending.length === 0) return;
 
       // Bound work: reconcile the 20 most recent pending orders per tick.
       for (const o of pending.slice(0, 20)) {
         try {
           const [filled, canc] = await Promise.all([
-            getOrderFilled(address!, o.nonce),
-            isCancelled(address!, o.nonce),
+            getOrderFilled(owner, o.nonce),
+            isCancelled(owner, o.nonce),
           ]);
           if (cancelled) return;
           const store = useLocalOrders.getState();
           if (canc) {
-            store.cancelOrder(o.nonce);
+            store.cancelOrder(o.nonce, owner);
           } else if (o.size > 0n && filled >= o.size) {
-            store.markFilled(o.nonce);
+            store.markFilled(o.nonce, owner);
           }
         } catch {
           /* transient RPC error — retry next tick */

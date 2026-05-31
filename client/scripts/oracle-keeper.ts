@@ -1,7 +1,7 @@
 #!/usr/bin/env tsx
 /**
- * Oracle Keeper — writes live XLM/USD prices from Binance to the
- * perp-oracle-adapter contract on Stellar testnet.
+ * Oracle Keeper — writes live active-market prices from Binance to the
+ * perp-oracle-adapter contract.
  *
  * Requires:
  *   ORACLE_PUBLISHER_SECRET=S... (Stellar secret key of the authorized publisher)
@@ -13,20 +13,21 @@
 
 import {
   Keypair,
-  Account,
   Contract,
   TransactionBuilder,
   nativeToScVal,
   xdr,
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
+import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
 
-const RPC_URL = "https://soroban-testnet.stellar.org";
-const NETWORK = "Test SDF Network ; September 2015";
-const ORACLE_ADAPTER = "CDC342E2GSLQKPHNWOWYUKNMSBES2OOTRHKA7YZO77SCZEN6XDQ334MD";
 const PRICE_PRECISION = BigInt("1000000000000000000"); // 1e18
 const PUBLISH_INTERVAL_MS = 8_000; // every 8s — oracle guard max_age is 60s
-const BINANCE_URL = "https://api.binance.com/api/v3/ticker/price?symbol=XLMUSDT";
+const ORACLE_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
+  symbol: m.symbol,
+  oracleSymbol: m.oracleSymbol,
+  priceSourceSymbol: m.priceSourceSymbol,
+}));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -38,8 +39,10 @@ function toU64ScVal(n: bigint): xdr.ScVal {
   return nativeToScVal(n, { type: "u64" });
 }
 
-async function fetchBinancePrice(): Promise<{ price: bigint; confidence: bigint; publishTime: bigint }> {
-  const res = await fetch(BINANCE_URL, { cache: "no-store" } as RequestInit);
+async function fetchBinancePrice(priceSourceSymbol: string): Promise<{ price: bigint; confidence: bigint; publishTime: bigint }> {
+  const url = `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(priceSourceSymbol)}`;
+  const res = await fetch(url, { cache: "no-store" } as RequestInit);
+  if (!res.ok) throw new Error(`Binance price fetch failed for ${priceSourceSymbol}`);
   const data = await res.json() as { price: string };
   const priceFloat = parseFloat(data.price);
   const price = BigInt(Math.round(priceFloat * Number(PRICE_PRECISION)));
@@ -61,30 +64,28 @@ async function run() {
 
   const publisherKp = Keypair.fromSecret(secret);
   const publisherAddress = publisherKp.publicKey();
-  const server = new sorobanRpc.Server(RPC_URL);
-  const contract = new Contract(ORACLE_ADAPTER);
-  const assetArg = nativeToScVal("XLM", { type: "symbol" });
+  const server = new sorobanRpc.Server(NETWORK.rpcUrl);
+  const contract = new Contract(CONTRACTS.oracleAdapter);
   const publisherArg = nativeToScVal(publisherAddress, { type: "address" });
 
   console.log(`✓ Oracle keeper starting`);
   console.log(`  Publisher : ${publisherAddress}`);
-  console.log(`  Contract  : ${ORACLE_ADAPTER}`);
+  console.log(`  Network   : ${NETWORK.name}`);
+  console.log(`  Contract  : ${CONTRACTS.oracleAdapter}`);
+  console.log(`  Markets   : ${ORACLE_MARKETS.map((m) => `${m.symbol}:${m.priceSourceSymbol}`).join(", ")}`);
   console.log(`  Interval  : ${PUBLISH_INTERVAL_MS / 1000}s`);
 
-  let seq = 1000;
-
-  async function tick() {
+  async function publishMarket(market: (typeof ORACLE_MARKETS)[number]) {
     try {
-      const { price, confidence, publishTime } = await fetchBinancePrice();
+      const { price, confidence, publishTime } = await fetchBinancePrice(market.priceSourceSymbol);
       const priceHuman = Number(price) / Number(PRICE_PRECISION);
-      process.stdout.write(`\r  Publishing XLM $${priceHuman.toFixed(4)} at ${new Date().toISOString().slice(11, 19)}...`);
-
-      const account = new Account(publisherAddress, (seq++).toString());
+      process.stdout.write(`\r  Publishing ${market.oracleSymbol} $${priceHuman.toFixed(4)} at ${new Date().toISOString().slice(11, 19)}...`);
 
       // Fetch real sequence for submission
       const onChainAccount = await server.getAccount(publisherAddress);
+      const assetArg = nativeToScVal(market.oracleSymbol, { type: "symbol" });
 
-      const tx = new TransactionBuilder(onChainAccount, { fee: "500000", networkPassphrase: NETWORK })
+      const tx = new TransactionBuilder(onChainAccount, { fee: "500000", networkPassphrase: NETWORK.passphrase })
         .addOperation(
           contract.call(
             "write_price",
@@ -130,6 +131,12 @@ async function run() {
       process.stdout.write(` ? timeout\n`);
     } catch (e) {
       process.stdout.write(` ✗ ${(e as Error).message?.slice(0, 100)}\n`);
+    }
+  }
+
+  async function tick() {
+    for (const market of ORACLE_MARKETS) {
+      await publishMarket(market);
     }
   }
 

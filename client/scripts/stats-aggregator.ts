@@ -13,9 +13,9 @@
  */
 
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
+import { NETWORK } from "../config";
 
 type Sql = NeonQueryFunction<false, false>;
-const NETWORK = "testnet";
 const PERIODS = [
   { period: "DAY", since: () => new Date(Date.now() - 24 * 3600 * 1000) },
   { period: "WEEK", since: () => new Date(Date.now() - 7 * 24 * 3600 * 1000) },
@@ -36,10 +36,10 @@ async function volumeStats(sql: Sql, since: Date) {
            MAX("createdAt") AS last_trade_at
     FROM (
       SELECT maker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill"
-        WHERE network = ${NETWORK} AND "createdAt" >= ${since.toISOString()}
+        WHERE network = ${NETWORK.name} AND "createdAt" >= ${since.toISOString()}
       UNION ALL
       SELECT taker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill"
-        WHERE network = ${NETWORK} AND "createdAt" >= ${since.toISOString()}
+        WHERE network = ${NETWORK.name} AND "createdAt" >= ${since.toISOString()}
     ) t
     GROUP BY addr
   `;
@@ -56,7 +56,7 @@ async function pnlStats(sql: Sql, since: Date) {
            COUNT(*) FILTER (WHERE kind = 'REALIZED_TRADE' AND amount::numeric < 0)::int AS losses,
            COUNT(*) FILTER (WHERE kind = 'LIQUIDATION')::int AS liq_count
     FROM "PnlEvent"
-    WHERE network = ${NETWORK} AND "createdAt" >= ${since.toISOString()}
+    WHERE network = ${NETWORK.name} AND "createdAt" >= ${since.toISOString()}
     GROUP BY address
   `;
 }
@@ -68,7 +68,7 @@ async function depositStats(sql: Sql) {
            SUM(CASE WHEN kind = 'DEPOSIT' THEN amount::numeric ELSE 0 END)::text AS deposited,
            SUM(CASE WHEN kind = 'WITHDRAWAL' THEN amount::numeric ELSE 0 END)::text AS withdrawn
     FROM "BalanceChange"
-    WHERE network = ${NETWORK}
+    WHERE network = ${NETWORK.name}
     GROUP BY address
   `;
 }
@@ -107,7 +107,7 @@ async function aggregatePeriod(sql: Sql, period: string, since: Date) {
         "winRate", roi, "feesPaid", "fundingPaid", "liquidationCount",
         "peakCollateral", "lastTradeAt", "updatedAt"
       ) VALUES (
-        ${cuid()}, ${NETWORK}, ${addr}, ${period}::"StatsPeriod", ${since.toISOString()},
+        ${cuid()}, ${NETWORK.name}, ${addr}, ${period}::"StatsPeriod", ${since.toISOString()},
         ${String(s.realizedPnl ?? "0")}, ${String(s.volume ?? "0")}, ${Number(s.tradeCount ?? 0)},
         ${wins}, ${losses}, ${winRate.toFixed(4)}, ${roi.toFixed(4)},
         ${String(s.feesPaid ?? "0")}, ${String(s.fundingPaid ?? "0")}, ${Number(s.liqCount ?? 0)},
@@ -148,7 +148,7 @@ async function aggregatePeriod(sql: Sql, period: string, since: Date) {
 
     await sql`
       INSERT INTO "LeaderboardSnapshot" (network, period, metric, rankings, "traderCount")
-      VALUES (${NETWORK}, ${period}::"StatsPeriod", 'pnl', ${JSON.stringify(ranked)}::jsonb, ${byAddr.size})
+      VALUES (${NETWORK.name}, ${period}::"StatsPeriod", 'pnl', ${JSON.stringify(ranked)}::jsonb, ${byAddr.size})
     `;
   }
 
@@ -163,9 +163,9 @@ async function aggregateAnalytics(sql: Sql) {
              SUM((("fillSize"::numeric)*("fillPrice"::numeric)/1e18)) AS volume,
              COUNT(*) AS trades, MIN("createdAt") AS first_at, MAX("createdAt") AS last_at
       FROM (
-        SELECT maker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill" WHERE network = ${NETWORK}
+        SELECT maker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill" WHERE network = ${NETWORK.name}
         UNION ALL
-        SELECT taker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill" WHERE network = ${NETWORK}
+        SELECT taker AS addr, "fillSize", "fillPrice", "createdAt" FROM "Fill" WHERE network = ${NETWORK.name}
       ) f GROUP BY addr
     ),
     p AS (
@@ -176,13 +176,13 @@ async function aggregateAnalytics(sql: Sql) {
              COUNT(*) FILTER (WHERE kind='REALIZED_TRADE' AND amount::numeric>0) AS wins,
              COUNT(*) FILTER (WHERE kind='REALIZED_TRADE' AND amount::numeric<0) AS losses,
              COUNT(*) FILTER (WHERE kind='LIQUIDATION') AS liqs
-      FROM "PnlEvent" WHERE network = ${NETWORK} GROUP BY address
+      FROM "PnlEvent" WHERE network = ${NETWORK.name} GROUP BY address
     ),
     b AS (
       SELECT address,
              SUM(CASE WHEN kind='DEPOSIT' THEN amount::numeric ELSE 0 END) AS deposited,
              SUM(CASE WHEN kind='WITHDRAWAL' THEN amount::numeric ELSE 0 END) AS withdrawn
-      FROM "BalanceChange" WHERE network = ${NETWORK} GROUP BY address
+      FROM "BalanceChange" WHERE network = ${NETWORK.name} GROUP BY address
     )
     SELECT COALESCE(v.address,p.address,b.address) AS address,
            COALESCE(v.volume,0)::text AS volume, COALESCE(v.trades,0)::int AS trades,
@@ -204,7 +204,7 @@ async function aggregateAnalytics(sql: Sql) {
         "totalDeposited", "totalWithdrawn", "totalFundingPaid", "totalFeesPaid",
         "liquidationCount", "firstTradeAt", "lastTradeAt", "updatedAt"
       ) VALUES (
-        ${NETWORK}, ${r.address as string}, ${r.realized as string}, ${r.volume as string},
+        ${NETWORK.name}, ${r.address as string}, ${r.realized as string}, ${r.volume as string},
         ${Number(r.trades)}, ${winRate.toFixed(4)}, ${r.deposited as string}, ${r.withdrawn as string},
         ${r.funding as string}, ${r.fees as string}, ${Number(r.liqs)},
         ${(r.first_at as string) ?? null}, ${(r.last_at as string) ?? null}, NOW()

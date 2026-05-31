@@ -2,7 +2,9 @@
 #![deny(unsafe_code)]
 
 use protocol_core::{checked_add, CoreError, MarginMode, Position};
-use soroban_sdk::{contract, contractimpl, contracttype, vec, Address, Env, IntoVal, Symbol, Vec};
+use soroban_sdk::{
+    contract, contractimpl, contracttype, vec, Address, Env, IntoVal, Symbol, Val, Vec,
+};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -82,11 +84,9 @@ impl PerpOrderGatewayContract {
         Ok(())
     }
 
-    /// Set the trusted operator (off-chain matcher fee-payer) authorized to
-    /// submit settle_fill on behalf of matched maker/taker orders. This is the
-    /// trusted-sequencer model used by most perp DEXs — the operator can only
-    /// settle orders that pass on-chain validation (price band, expiry,
-    /// cancellation, overfill checks).
+    /// Set the matcher operator authorized to submit settle_fill transactions.
+    /// Maker and taker still authorize their exact order intents with Soroban
+    /// auth entries, so the operator cannot invent or mutate user orders.
     pub fn set_operator(env: Env, operator: Address) -> Result<(), CoreError> {
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::Operator, &operator);
@@ -126,10 +126,9 @@ impl PerpOrderGatewayContract {
     }
 
     pub fn settle_fill(env: Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> {
-        // Trusted-operator model: the off-chain matcher fee-payer authorizes
-        // settlement. On-chain validation (price band, expiry, cancellation,
-        // overfill) still protects users from a misbehaving matcher.
         require_operator(&env)?;
+        require_order_auth(&env, Symbol::new(&env, "maker"), &fill.maker);
+        require_order_auth(&env, Symbol::new(&env, "taker"), &fill.taker);
         validate_fill(&env, &fill)?;
 
         settle_user_side(
@@ -208,6 +207,22 @@ fn require_operator(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::Unauthorized)?;
     operator.require_auth();
     Ok(operator)
+}
+
+fn require_order_auth(env: &Env, role: Symbol, order: &Order) {
+    let args: Vec<Val> = vec![
+        env,
+        Symbol::new(env, "settle_fill").into_val(env),
+        role.into_val(env),
+        order.market_id.into_val(env),
+        order.is_long.into_val(env),
+        order.size.into_val(env),
+        order.limit_price.into_val(env),
+        order.reduce_only.into_val(env),
+        order.nonce.into_val(env),
+        order.expiry_ts.into_val(env),
+    ];
+    order.owner.require_auth_for_args(args);
 }
 
 fn engine_address(env: &Env) -> Result<Address, CoreError> {

@@ -1,0 +1,60 @@
+name: production-validation
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_mainnet:
+        description: Type mainnet to validate production
+        required: true
+        type: string
+      soak_seconds:
+        description: Market-data soak duration in seconds
+        required: false
+        default: "120"
+        type: string
+      websocket_connections:
+        description: Concurrent websocket connections for reconnect storm probe
+        required: false
+        default: "100"
+        type: string
+      rate_limit_probe:
+        description: Run abuse-style rate-limit probe
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  group: production-validation
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: live production validation
+    if: ${{ inputs.confirm_mainnet == 'mainnet' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    env:
+      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
+      NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL }}
+      LIVE_GATE_MARKET_ID: ${{ vars.LIVE_GATE_MARKET_ID || '1' }}
+      LIVE_GATE_SOAK_SECONDS: ${{ inputs.soak_seconds }}
+      LIVE_GATE_WS_CONNECTIONS: ${{ inputs.websocket_connections }}
+      LIVE_GATE_RATE_LIMIT_PROBE: ${{ inputs.rate_limit_probe }}
+      WALLET_E2E_EVIDENCE_URL: ${{ vars.WALLET_E2E_EVIDENCE_URL }}
+      TRADING_E2E_EVIDENCE_URL: ${{ vars.TRADING_E2E_EVIDENCE_URL }}
+      OBSERVABILITY_DASHBOARD_URL: ${{ vars.OBSERVABILITY_DASHBOARD_URL }}
+      INCIDENT_RUNBOOK_URL: ${{ vars.INCIDENT_RUNBOOK_URL }}
+      ROLLBACK_RUNBOOK_URL: ${{ vars.ROLLBACK_RUNBOOK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - run: npm ci
+      - run: npm run production:live-gate

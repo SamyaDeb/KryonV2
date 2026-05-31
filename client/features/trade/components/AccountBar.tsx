@@ -29,7 +29,7 @@ export function AccountBar() {
   if (!connected || !address) return null;
 
   return (
-    <div className="flex items-center justify-between gap-3 px-4 py-[11px] border-b border-[#34343a]">
+    <div className="flex items-center justify-between gap-3 px-4 py-[11px] border-b border-[#334155]">
       <div className="flex items-center gap-5">
         <Stat
           label="Balance"
@@ -62,8 +62,8 @@ function Stat({
 }) {
   return (
     <div className="flex flex-col items-start gap-0.5">
-      <span className="text-[10px] text-[#8a8a93] uppercase tracking-wider">{label}</span>
-      <span className={`flex items-center gap-[4px] tabular text-xs font-semibold ${valueClass ?? "text-[#e6e6e6]"}`}>
+      <span className="text-[10px] text-[#a3a3a3] uppercase tracking-wider">{label}</span>
+      <span className={`flex items-center gap-[4px] tabular text-xs font-semibold ${valueClass ?? "text-[#f5f5f5]"}`}>
         {icon}
         {value}
       </span>

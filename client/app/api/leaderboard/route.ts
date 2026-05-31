@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { NETWORK } from "@/config";
 
-const NETWORK = "testnet";
 const VALID_PERIODS = ["DAY", "WEEK", "MONTH", "ALL"] as const;
 const VALID_METRICS: Record<string, string> = {
   pnl: '"realizedPnl"',
@@ -36,13 +36,13 @@ export async function GET(req: NextRequest) {
       ORDER BY (${orderCol})::numeric DESC
       LIMIT $3 OFFSET $4
     `;
-    const params = search ? [NETWORK, period, limit, offset, "%" + search + "%"] : [NETWORK, period, limit, offset];
+    const params = search ? [NETWORK.name, period, limit, offset, "%" + search + "%"] : [NETWORK.name, period, limit, offset];
 
     // Count + page in parallel (independent queries → one round-trip latency).
     const [countRows, rows] = await Promise.all([
       search
-        ? sql`SELECT COUNT(*)::int AS c FROM "TraderStat" WHERE network = ${NETWORK} AND period = ${period}::"StatsPeriod" AND address ILIKE ${"%" + search + "%"}`
-        : sql`SELECT COUNT(*)::int AS c FROM "TraderStat" WHERE network = ${NETWORK} AND period = ${period}::"StatsPeriod"`,
+        ? sql`SELECT COUNT(*)::int AS c FROM "TraderStat" WHERE network = ${NETWORK.name} AND period = ${period}::"StatsPeriod" AND address ILIKE ${"%" + search + "%"}`
+        : sql`SELECT COUNT(*)::int AS c FROM "TraderStat" WHERE network = ${NETWORK.name} AND period = ${period}::"StatsPeriod"`,
       sql.query(query, params),
     ]);
     const total = Number((countRows as Record<string, unknown>[])[0]?.c ?? 0);
@@ -63,9 +63,9 @@ export async function GET(req: NextRequest) {
       { period, metric, total, limit, offset, traders: data },
       { headers: { "Cache-Control": "s-maxage=10, stale-while-revalidate=30" } }
     );
-  } catch (e) {
+  } catch {
     return NextResponse.json(
-      { period, metric, total: 0, limit, offset, traders: [], error: String(e) },
+      { period, metric, total: 0, limit, offset, traders: [], error: "leaderboard_unavailable" },
       { status: 500 }
     );
   }

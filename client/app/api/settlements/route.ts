@@ -1,12 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
+import { StrKey } from "@stellar/stellar-sdk";
 import { db } from "@/lib/db";
+import { rateLimit, requestKey } from "@/lib/rate-limit";
 
 // GET /api/settlements?address=G...
 // Returns pending settle_fill jobs where the caller is maker or taker
 // and has not yet signed their auth entry.
 export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get("address");
-  if (!address) return NextResponse.json([], { status: 400 });
+  if (!address || !StrKey.isValidEd25519PublicKey(address)) {
+    return NextResponse.json([], { status: 400 });
+  }
+  if (!(await rateLimit(requestKey(req, address), 120))) {
+    return NextResponse.json([], { status: 429 });
+  }
 
   try {
     const sql = db();
@@ -52,10 +59,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(pending, {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (e) {
-    return NextResponse.json([], {
-      status: 500,
-      headers: { "X-Error": String(e) },
-    });
+  } catch {
+    return NextResponse.json([], { status: 500 });
   }
 }

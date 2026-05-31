@@ -71,7 +71,7 @@ export function PositionsTable({
   return (
     <table className="w-full text-[12px] tabular">
       <thead>
-        <tr className="text-[10px] text-[#5a5f67] font-semibold uppercase tracking-wider">
+        <tr className="text-[10px] text-[#737373] font-semibold uppercase tracking-wider">
           {cols.map((h, i) => (
             <th
               key={h || `act-${i}`}
@@ -146,7 +146,7 @@ function PositionRow({
     : null;
   const pnlHuman = pnl !== null ? amountToHuman(pnl) : null;
   const pnlColor =
-    pnlHuman === null ? "text-[#8a8f97]" : pnlHuman >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]";
+    pnlHuman === null ? "text-[#a3a3a3]" : pnlHuman >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]";
 
   // Position notional and the margin backing it (initial-margin requirement).
   const notional = sizeHuman * refPrice;
@@ -184,13 +184,13 @@ function PositionRow({
     : "bg-[rgba(227,76,76,0.12)] text-[#e34c4c]";
 
   return (
-    <tr className="border-t border-[#1f232a] hover:bg-white/[0.02] transition-colors">
+    <tr className="border-t border-[#2A2A31] hover:bg-white/[0.02] transition-colors">
       <td className="pl-4 pr-2 py-[10px] text-left">
         <div className="flex items-center gap-2">
           {baseSymbol === "XLM" ? <XlmLogo size={16} /> : null}
-          <span className="font-semibold text-[#e6e6e6]">
+          <span className="font-semibold text-[#f5f5f5]">
             {baseSymbol}
-            <span className="text-[#5a5f67] font-normal">/USDC</span>
+            <span className="text-[#737373] font-normal">/USDC</span>
           </span>
           <span className={`rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${sideBadge}`}>
             {lev > 0 ? `${lev}× ` : ""}
@@ -202,10 +202,10 @@ function PositionRow({
         <span className={`font-semibold ${position.isLong ? "text-[#1fae5b]" : "text-[#e34c4c]"}`}>
           {sizeHuman.toFixed(4)}
         </span>{" "}
-        <span className="text-[#5a5f67]">{baseSymbol}</span>
+        <span className="text-[#737373]">{baseSymbol}</span>
       </td>
-      <td className="px-3 py-[10px] text-right text-[#e6e6e6] font-medium">${entryHuman.toFixed(4)}</td>
-      <td className="px-3 py-[10px] text-right text-[#e6e6e6] font-medium">
+      <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">${entryHuman.toFixed(4)}</td>
+      <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">
         {markHuman !== null ? `$${markHuman.toFixed(4)}` : "—"}
       </td>
       {!hidePnl && (
@@ -228,14 +228,14 @@ function PositionRow({
       {!hideLiqPrice && (
         <td className="px-3 py-[10px] text-right text-amber-400">{liqPrice ?? "—"}</td>
       )}
-      <td className="px-3 py-[10px] text-right text-[#8a8f97]">
+      <td className="px-3 py-[10px] text-right text-[#a3a3a3]">
         <span className="inline-flex items-center justify-end gap-1">
           {positionMargin.toFixed(2)} <UsdcLogo size={12} />
         </span>
       </td>
       <td className="pr-4 pl-2 py-[10px] text-right">
         <button
-          className="px-3 py-1.5 text-[12px] font-semibold rounded-[6px] border border-[#1f232a] text-[#e6e6e6] hover:bg-[#14171c] hover:border-[#2a2f37] disabled:opacity-50 transition-colors"
+          className="px-3 py-1.5 text-[12px] font-semibold rounded-[6px] border border-[#334155] text-[#f5f5f5] hover:bg-[#212128] hover:border-[#475569] disabled:opacity-50 transition-colors"
           disabled={closing}
           onClick={async () => {
             setClosing(true);
@@ -252,11 +252,8 @@ function PositionRow({
 
 function Empty({ text }: { text: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-10 text-[12px] text-[#5a6585]">
-      <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M7 7l10 10M17 7L7 17" />
-      </svg>
-      <span className="underline decoration-dotted underline-offset-4">{text}</span>
+    <div className="flex flex-col items-center gap-3 py-10 text-[#a3a3a3]">
+      <span className="text-[13px] text-[#a3a3a3]">{text}</span>
     </div>
   );
 }

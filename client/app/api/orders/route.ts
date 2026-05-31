@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db, withRetry } from "@/lib/db";
 import { validateOrderIntent } from "@/lib/validation";
+import { bodyTooLarge, rateLimit, requestKey } from "@/lib/rate-limit";
 
 // Persist incoming order intent from the frontend to the DB.
 // The off-chain matcher will pick these up and settle fills on-chain.
 export async function POST(req: NextRequest) {
+  if (bodyTooLarge(req)) {
+    return NextResponse.json({ ok: false, error: "Body too large" }, { status: 413 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -19,6 +24,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }
   const o = result.order;
+  if (!(await rateLimit(requestKey(req, o.owner), 30))) {
+    return NextResponse.json({ ok: false, error: "Too many order requests" }, { status: 429 });
+  }
 
   try {
     const sql = db();

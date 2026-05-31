@@ -1,15 +1,19 @@
 "use client"
 
+import { useEffect, useRef, useState } from 'react'
+import { ChevronDown, Maximize, RefreshCcw } from 'lucide-react'
 import type { Timeframe, ChartType } from '../types'
 
-const TIMEFRAMES: Timeframe[] = ['1m', '5m', '15m', '1h', '4h', '1d']
-const MORE_TFS: Timeframe[] = ['3m', '30m', '2h', '6h', '12h', '1w']
+const TIMEFRAMES: Timeframe[] = ['5m', '15m', '1h']
+const MORE_TFS: Timeframe[] = ['1m', '3m', '30m', '2h', '4h', '6h', '12h', '1d', '1w']
 
 interface Props {
   timeframe: Timeframe
   chartType: ChartType
   onTimeframeChange: (tf: Timeframe) => void
   onChartTypeChange: (type: ChartType) => void
+  onReset: () => void
+  onFullscreen: () => void
 }
 
 const CHART_TYPE_ICONS: Record<ChartType, React.ReactNode> = {
@@ -45,62 +49,104 @@ const CHART_TYPES: ChartType[] = ['candles', 'bars', 'line', 'area']
 // Indicators / drawing / compare are provided natively inside the TradingView
 // chart, so this bar intentionally exposes only the two controls we forward.
 export function ChartTopBar({
-  timeframe, chartType, onTimeframeChange, onChartTypeChange,
+  timeframe, chartType, onTimeframeChange, onChartTypeChange, onReset, onFullscreen,
 }: Props) {
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!moreOpen) return
+    function onDoc(e: MouseEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false)
+    }
+    document.addEventListener('mousedown', onDoc)
+    return () => document.removeEventListener('mousedown', onDoc)
+  }, [moreOpen])
+
   const tfCls = (active: boolean) =>
-    `px-[9px] py-[5px] rounded-[5px] text-[12px] font-mono font-medium transition-colors ${
+    `px-[7px] py-[4px] rounded-[5px] text-[12.5px] font-medium transition-colors ${
       active
-        ? 'text-[#f7931a] bg-[rgba(247,147,26,0.1)]'
-        : 'text-[#5a5f67] hover:text-[#c4c8d0]'
+        ? 'text-[#f5f5f5]'
+        : 'text-[#6f7b8d] hover:text-[#d4d4d8]'
     }`
+  const iconCls = (active: boolean) =>
+    `h-7 w-7 rounded-[4px] grid place-items-center transition-colors ${
+      active ? 'text-[#f5f5f5] bg-[#2A2A31]' : 'text-[#a3a3a3] hover:text-[#f5f5f5] hover:bg-[#2A2A31]'
+    }`
+  const utilityCls =
+    'h-7 w-7 rounded-[4px] grid place-items-center text-[#a3a3a3] hover:text-[#f5f5f5] hover:bg-[#2A2A31] transition-colors'
 
   return (
-    <div className="flex items-center px-3 border-b border-[#1f232a] shrink-0" style={{ minHeight: 42 }}>
-      <div className="flex items-center gap-[2px]">
+    <div className="flex items-center justify-between gap-2 px-3 shrink-0 bg-[#19191A]" style={{ minHeight: 36 }}>
+      <div className="flex items-center gap-[6px] min-w-0">
         {/* Timeframes */}
-        {TIMEFRAMES.map(tf => (
-          <button key={tf} className={tfCls(tf === timeframe)} onClick={() => onTimeframeChange(tf)}>
-            {tf}
+        <div className="flex items-center gap-[2px]">
+          {TIMEFRAMES.map(tf => (
+            <button key={tf} className={tfCls(tf === timeframe)} onClick={() => onTimeframeChange(tf)}>
+              {tf}
+            </button>
+          ))}
+        </div>
+        <div className="relative" ref={moreRef}>
+          <button
+            type="button"
+            className={`${tfCls(MORE_TFS.includes(timeframe))} flex items-center gap-1`}
+            onClick={() => setMoreOpen((v) => !v)}
+            aria-expanded={moreOpen}
+          >
+            {MORE_TFS.includes(timeframe) ? timeframe : ''}
+            <ChevronDown size={14} strokeWidth={1.8} />
           </button>
-        ))}
-        <div className="relative group">
-          <button className={tfCls(MORE_TFS.includes(timeframe))}>
-            {MORE_TFS.includes(timeframe) ? timeframe : '▾'}
-          </button>
-          <div className="absolute top-full left-0 mt-1 bg-[#12151a] border border-[#1f232a] rounded-lg p-1 z-50 opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-opacity">
+          {moreOpen && (
+          <div className="absolute top-full left-0 mt-1 bg-[#19191A] border border-[#334155] rounded-lg p-1 z-50">
             {MORE_TFS.map(tf => (
               <button
                 key={tf}
-                className={`block w-full px-3 py-[5px] text-left text-[12px] font-mono rounded-[4px] transition-colors ${
-                  tf === timeframe ? 'text-[#e2e4e9] bg-[#1f232a]' : 'text-[#5a5f67] hover:text-[#c4c8d0] hover:bg-[#14171c]'
+                className={`block w-full px-3 py-[6px] text-left text-[12px] font-mono rounded-[4px] transition-colors ${
+                  tf === timeframe ? 'text-[#f5f5f5] bg-[#2A2A31]' : 'text-[#a3a3a3] hover:text-[#f5f5f5] hover:bg-[#2A2A31]'
                 }`}
-                onClick={() => onTimeframeChange(tf)}
+                onClick={() => {
+                  onTimeframeChange(tf)
+                  setMoreOpen(false)
+                }}
               >
                 {tf}
               </button>
             ))}
           </div>
+          )}
         </div>
 
-        <div className="w-px h-[14px] bg-[#1f232a] mx-[4px]" />
+        <div className="w-[10px] shrink-0" />
 
         {/* Chart types */}
-        <div className="flex items-center">
+        <div className="flex items-center gap-[3px]">
           {CHART_TYPES.map(ct => (
             <button
               key={ct}
               title={ct.charAt(0).toUpperCase() + ct.slice(1)}
               onClick={() => onChartTypeChange(ct)}
-              className={`w-8 h-8 rounded-[5px] grid place-items-center transition-colors ${
-                chartType === ct
-                  ? 'bg-[#14171c] text-[#e2e4e9]'
-                  : 'text-[#5a5f67] hover:bg-[#14171c] hover:text-[#c4c8d0]'
-              }`}
+              className={iconCls(chartType === ct)}
             >
               {CHART_TYPE_ICONS[ct]}
             </button>
           ))}
         </div>
+
+        <div className="w-[10px] shrink-0" />
+
+        <div className="flex items-center gap-2 text-[13px] text-[#a3a3a3]">
+          <span className="inline-flex h-7 items-center px-2">Indicators</span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-[6px] shrink-0">
+        <button type="button" title="Reset chart controls" className={utilityCls} onClick={onReset}>
+          <RefreshCcw size={17} strokeWidth={1.8} />
+        </button>
+        <button type="button" title="Fullscreen chart" className={utilityCls} onClick={onFullscreen}>
+          <Maximize size={18} strokeWidth={1.8} />
+        </button>
       </div>
     </div>
   )

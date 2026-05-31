@@ -21,9 +21,14 @@ interface MarketState {
   marketStats: Record<number, { lastPrice: bigint; volume: bigint; longOI: bigint; shortOI: bigint } | null>;
   setMarketStats: (marketId: number, stats: { lastPrice: bigint; volume: bigint; longOI: bigint; shortOI: bigint }) => void;
 
-  // 24h price change percentage by marketId (positive = up, negative = down)
+  // 24h ticker data by marketId, sourced from the configured external market feed.
   priceChangePct: Record<number, number>;
   setPriceChangePct: (marketId: number, pct: number) => void;
+  ticker24h: Record<number, { highPrice: bigint; lowPrice: bigint; changePct: number }>;
+  setTicker24h: (
+    marketId: number,
+    ticker: { highPrice: bigint; lowPrice: bigint; changePct: number }
+  ) => void;
 
   // WebSocket connection status
   wsConnected: boolean;
@@ -61,6 +66,9 @@ export const useMarketStore = create<MarketState>((set) => ({
   priceChangePct: {},
   setPriceChangePct: (marketId, pct) =>
     set((s) => ({ priceChangePct: { ...s.priceChangePct, [marketId]: pct } })),
+  ticker24h: {},
+  setTicker24h: (marketId, ticker) =>
+    set((s) => ({ ticker24h: { ...s.ticker24h, [marketId]: ticker } })),
 
   wsConnected: false,
   setWsConnected: (wsConnected) => set({ wsConnected }),

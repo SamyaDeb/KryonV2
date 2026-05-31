@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useChartStore } from '@/stores/chart'
 import { ChartTopBar } from './ChartTopBar'
 import { TradingViewWidget } from './TradingViewWidget'
@@ -27,6 +27,7 @@ const TV_STYLE: Record<string, string> = {
 export function KryonChart({ symbol }: Props) {
   const { timeframe, chartType, setTimeframe, setChartType } = useChartStore()
   const [utcTime, setUtcTime] = useState('')
+  const shellRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function tick() {
@@ -42,14 +43,30 @@ export function KryonChart({ symbol }: Props) {
   const tvInterval = TV_INTERVAL[timeframe] ?? '60'
   const tvStyle = TV_STYLE[chartType] ?? '1'
 
+  const resetControls = () => {
+    setTimeframe('1h')
+    setChartType('candles')
+  }
+
+  const toggleFullscreen = async () => {
+    if (typeof document === 'undefined') return
+    if (document.fullscreenElement) {
+      await document.exitFullscreen().catch(() => undefined)
+      return
+    }
+    await shellRef.current?.requestFullscreen?.().catch(() => undefined)
+  }
+
   return (
-    <div className="flex flex-col h-full overflow-hidden rounded-xl border border-[#1f232a] bg-[#0f1217]">
+    <div ref={shellRef} className="flex flex-col h-full overflow-hidden rounded-none bg-[#19191A]">
       {/* Top bar — timeframe & chart type drive the TradingView widget */}
       <ChartTopBar
         timeframe={timeframe}
         chartType={chartType}
         onTimeframeChange={setTimeframe}
         onChartTypeChange={setChartType}
+        onReset={resetControls}
+        onFullscreen={toggleFullscreen}
       />
 
       {/* Chart body */}
@@ -58,8 +75,8 @@ export function KryonChart({ symbol }: Props) {
       </div>
 
       {/* Bottom bar */}
-      <div className="flex items-center justify-end px-4 py-[6px] border-t border-[#1f232a] shrink-0">
-        <span className="text-[11px] font-mono text-[#3a3f47]">{utcTime}</span>
+      <div className="flex items-center justify-end px-4 py-[6px] shrink-0">
+        <span className="text-[11px] font-mono text-[#525252]">{utcTime}</span>
       </div>
     </div>
   )

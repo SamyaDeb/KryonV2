@@ -1,6 +1,13 @@
 "use client";
 
 import { OrderIntent, orderIntentToJson } from "./order-intent";
+import {
+  cancelSigningMessage,
+  orderSigningMessage,
+  type SignedCancelPayload,
+  type SignedOrderPayload,
+} from "./signing-message";
+import { freighterSignMessage } from "@/lib/stellar/freighter";
 
 // All order/market data flows through this app's own same-origin API routes
 // (app/api/**). Using relative paths means it works regardless of the dev/prod
@@ -15,10 +22,15 @@ export interface MatcherOrder {
 
 export async function submitOrder(intent: OrderIntent): Promise<{ ok: boolean; error?: string }> {
   try {
+    const signature = await freighterSignMessage(orderSigningMessage(intent), intent.owner);
+    const payload: SignedOrderPayload = {
+      ...(orderIntentToJson(intent) as Omit<SignedOrderPayload, "signature">),
+      signature,
+    };
     const res = await fetch(`/api/orders`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(orderIntentToJson(intent)),
+      body: JSON.stringify(payload),
     });
     const data = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
     if (!res.ok || data.ok === false) {
@@ -26,16 +38,18 @@ export async function submitOrder(intent: OrderIntent): Promise<{ ok: boolean; e
     }
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: String(e) };
+    return { ok: false, error: e instanceof Error ? e.message : "Order signing failed" };
   }
 }
 
 export async function cancelOrderOnMatcher(owner: string, nonce: bigint): Promise<void> {
   try {
+    const signature = await freighterSignMessage(cancelSigningMessage(owner, nonce), owner);
+    const payload: SignedCancelPayload = { owner, nonce: nonce.toString(), signature };
     await fetch(`/api/orders/cancel`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, nonce: nonce.toString() }),
+      body: JSON.stringify(payload),
     });
   } catch {
     // best-effort

@@ -21,7 +21,6 @@ import {
   nativeToScVal,
   xdr,
   rpc as sorobanRpc,
-  Address,
 } from "@stellar/stellar-sdk";
 
 const RPC_URL     = "https://soroban-testnet.stellar.org";
@@ -35,20 +34,6 @@ const ORACLE_ADDR = "CCSO6WCYNDYXYU45XPY3SJIFJRSF5H67WVQDJU2GWWPWMWYGMC4XNPR4";
 function oracleSourceRedStone(): xdr.ScVal {
   // contracttype enum with no data: represented as a vec with one symbol element
   return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol("RedStone")]);
-}
-
-// OracleGuard { max_age_secs: 120, max_confidence_bps: 1000 }
-function oracleGuard(maxAgeSecs: number, maxConfBps: number): xdr.ScVal {
-  return xdr.ScVal.scvMap([
-    new xdr.ScMapEntry({
-      key:  xdr.ScVal.scvSymbol("max_age_secs"),
-      val:  nativeToScVal(maxAgeSecs, { type: "u64" }),
-    }),
-    new xdr.ScMapEntry({
-      key:  xdr.ScVal.scvSymbol("max_confidence_bps"),
-      val:  nativeToScVal(maxConfBps, { type: "u32" }),
-    }),
-  ]);
 }
 
 async function main() {

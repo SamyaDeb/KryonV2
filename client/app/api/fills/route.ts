@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { StrKey } from "@stellar/stellar-sdk";
 import { db } from "@/lib/db";
+import { rateLimit, requestKey } from "@/lib/rate-limit";
 
 const PRICE_SCALE  = 1e18;
 const AMOUNT_SCALE = 1e7;
@@ -7,7 +9,12 @@ const AMOUNT_SCALE = 1e7;
 // GET /api/fills?address=G...&since=<unix-ms>&limit=10
 export async function GET(req: NextRequest) {
   const address = req.nextUrl.searchParams.get("address");
-  if (!address) return NextResponse.json([], { status: 400 });
+  if (!address || !StrKey.isValidEd25519PublicKey(address)) {
+    return NextResponse.json([], { status: 400 });
+  }
+  if (!(await rateLimit(requestKey(req, address), 120))) {
+    return NextResponse.json([], { status: 429 });
+  }
 
   const since = req.nextUrl.searchParams.get("since");
   const limit = Math.min(parseInt(req.nextUrl.searchParams.get("limit") ?? "20", 10), 50);
@@ -46,7 +53,7 @@ export async function GET(req: NextRequest) {
     }));
 
     return NextResponse.json(fills, { headers: { "Cache-Control": "no-store" } });
-  } catch (e) {
-    return NextResponse.json([], { status: 500, headers: { "X-Error": String(e) } });
+  } catch {
+    return NextResponse.json([], { status: 500 });
   }
 }

@@ -12,6 +12,7 @@ const poppins = Poppins({
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
   title: "Kryon | Perpetuals DEX",
   description: "Decentralised perpetual futures on Stellar/Soroban — XLM-PERP",
   applicationName: "Kryon",
@@ -32,13 +33,13 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0f1217",
+  themeColor: "#19191A",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${poppins.variable} ${geistMono.variable} dark h-full`}>
-      <body className="h-full bg-[#000000] text-slate-200 antialiased">
+      <body className="h-full bg-[#19191A] text-[#f5f5f5] antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>

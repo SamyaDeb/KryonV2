@@ -1,16 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { Keypair, Transaction, xdr, rpc as sorobanRpc } from "@stellar/stellar-sdk";
+import { Keypair, StrKey, Transaction, xdr, rpc as sorobanRpc } from "@stellar/stellar-sdk";
 import { NETWORK } from "@/config";
+import { bodyTooLarge, rateLimit, requestKey } from "@/lib/rate-limit";
 
 export async function POST(
   req: NextRequest,
   ctx: { params: Promise<{ id: string }> }
 ) {
   const { id } = await ctx.params;
+  if (bodyTooLarge(req, 12_288)) {
+    return NextResponse.json({ ok: false, error: "Body too large" }, { status: 413 });
+  }
   const body = await req.json().catch(() => null);
   if (!body?.signedAuthEntry || !body?.address) {
     return NextResponse.json({ ok: false, error: "Missing signedAuthEntry or address" }, { status: 400 });
+  }
+  if (typeof body.address !== "string" || !StrKey.isValidEd25519PublicKey(body.address)) {
+    return NextResponse.json({ ok: false, error: "Invalid address" }, { status: 400 });
+  }
+  if (typeof body.signedAuthEntry !== "string" || body.signedAuthEntry.length > 8192) {
+    return NextResponse.json({ ok: false, error: "Invalid signed auth entry" }, { status: 400 });
+  }
+  try {
+    xdr.SorobanAuthorizationEntry.fromXDR(body.signedAuthEntry, "base64");
+  } catch {
+    return NextResponse.json({ ok: false, error: "Invalid signed auth entry" }, { status: 400 });
+  }
+  if (!(await rateLimit(requestKey(req, body.address), 30))) {
+    return NextResponse.json({ ok: false, error: "Too many settlement requests" }, { status: 429 });
   }
 
   const sql = db();
@@ -38,12 +56,22 @@ export async function POST(
     fillPrice: string;
     fillSize: string;
     marketId: number;
+    pendingTxHash?: string;
+    makerNonce?: string;
+    takerNonce?: string;
   };
 
   try {
     data = JSON.parse(job.unsignedXdr as string);
   } catch {
     return NextResponse.json({ ok: false, error: "Malformed TxJob payload" }, { status: 500 });
+  }
+
+  if (
+    !StrKey.isValidEd25519PublicKey(data.makerAddress) ||
+    !StrKey.isValidEd25519PublicKey(data.takerAddress)
+  ) {
+    return NextResponse.json({ ok: false, error: "Malformed TxJob parties" }, { status: 500 });
   }
 
   const isMaker = data.makerAddress === body.address;
@@ -69,7 +97,11 @@ export async function POST(
   // Both signed — inject signed auth entries and submit
   try {
     const server = new sorobanRpc.Server(NETWORK.rpcUrl);
-    const feeKp = Keypair.fromSecret(process.env.ORACLE_PUBLISHER_SECRET!);
+    const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET ?? process.env.ORACLE_PUBLISHER_SECRET;
+    if (!feePayerSecret) {
+      return NextResponse.json({ ok: false, error: "Missing matcher fee-payer secret" }, { status: 500 });
+    }
+    const feeKp = Keypair.fromSecret(feePayerSecret);
 
     const envelope = xdr.TransactionEnvelope.fromXDR(data.assembledTxXdr, "base64");
     const ops = envelope.v1().tx().operations();
@@ -91,7 +123,24 @@ export async function POST(
       await new Promise((r) => setTimeout(r, 1000));
       const poll = await server.getTransaction(send.hash);
       if (poll.status === "SUCCESS") {
-        await sql`UPDATE "TxJob" SET status = 'DONE', "updatedAt" = NOW() WHERE id = ${id}`;
+        const ledger = Number("ledger" in poll ? poll.ledger : 0);
+        await sql`
+          UPDATE "TxJob"
+          SET status = 'DONE', "submittedHash" = ${send.hash}, "updatedAt" = NOW()
+          WHERE id = ${id}
+        `;
+        if (data.pendingTxHash) {
+          await sql`
+            UPDATE "Fill"
+            SET "txHash" = ${send.hash}, ledger = ${ledger}
+            WHERE network = ${NETWORK.name}
+              AND "txHash" = ${data.pendingTxHash}
+              AND maker = ${data.makerAddress}
+              AND taker = ${data.takerAddress}
+              AND "makerNonce" = ${data.makerNonce ?? ""}
+              AND "takerNonce" = ${data.takerNonce ?? ""}
+          `;
+        }
         return NextResponse.json({ ok: true, status: "settled", hash: send.hash });
       }
       if (poll.status === "FAILED") {
@@ -100,7 +149,7 @@ export async function POST(
       }
     }
     return NextResponse.json({ ok: false, error: "timeout" }, { status: 504 });
-  } catch (e) {
-    return NextResponse.json({ ok: false, error: String(e) }, { status: 500 });
+  } catch {
+    return NextResponse.json({ ok: false, error: "Settlement submission failed" }, { status: 500 });
   }
 }

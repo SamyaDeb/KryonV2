@@ -1,6 +1,7 @@
 "use client";
 
 import type { OrderBook, RecentTrade } from "@/lib/market/matcher";
+import { WS_URL } from "@/config";
 
 // Realtime streaming is delivered by a dedicated WebSocket service, configured
 // via NEXT_PUBLIC_WS_URL (e.g. wss://stream.kryon.xyz). When unset — the
@@ -8,8 +9,6 @@ import type { OrderBook, RecentTrade } from "@/lib/market/matcher";
 // realtime data from resilient REST polling in MarketDataProvider. This keeps
 // the WS layer fully pluggable without spamming reconnects at a non-existent
 // endpoint.
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type WsMessage =

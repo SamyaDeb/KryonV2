@@ -1,14 +1,15 @@
 "use client";
 
 // Order intent — builds a signed Order struct for submission to the off-chain matcher.
-// The matcher pairs maker+taker and co-submits order_gateway.settle_fill on-chain.
+// The matcher pairs maker+taker, queues settle_fill, and users sign Soroban
+// auth entries before settlement is submitted on-chain.
 
 export interface OrderIntent {
   owner: string;
   marketId: number;
   isLong: boolean;
   size: bigint;       // i128 in AMOUNT_PRECISION (1e7)
-  limitPrice: bigint; // i128 in PRICE_PRECISION (1e18); 0 = market order sentinel
+  limitPrice: bigint; // i128 in PRICE_PRECISION (1e18)
   reduceOnly: boolean;
   nonce: bigint;
   expiryTs: bigint;   // unix seconds

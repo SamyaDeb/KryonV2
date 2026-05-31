@@ -58,7 +58,7 @@ export async function GET(
       { bids, asks, timestamp: Date.now() },
       { headers: { "Cache-Control": "no-store" } }
     );
-  } catch (e) {
-    return NextResponse.json(null, { status: 500, headers: { "X-Error": String(e) } });
+  } catch {
+    return NextResponse.json(null, { status: 500 });
   }
 }

@@ -4,9 +4,7 @@
 //
 // Precision: prices are 1e18, sizes/amounts are 1e7, monetary results are 1e7.
 
-import { PRICE_PRECISION } from "@/config";
-
-const NETWORK = "testnet";
+import { NETWORK, PRICE_PRECISION } from "@/config";
 
 export interface RawPos {
   marketId: number;
@@ -82,7 +80,7 @@ export async function recordFillPnl(
     if (realized !== 0n) {
       await sql`
         INSERT INTO "PnlEvent" (network, address, "marketId", kind, amount, size, price, ledger, "txHash", "refKey")
-        VALUES (${NETWORK}, ${who.address}, ${args.marketId}, 'REALIZED_TRADE',
+        VALUES (${NETWORK.name}, ${who.address}, ${args.marketId}, 'REALIZED_TRADE',
                 ${realized.toString()}, ${args.fillSize.toString()}, ${args.fillPrice.toString()},
                 ${args.ledger}, ${args.txHash}, ${refKey})
         ON CONFLICT (network, address, kind, "refKey") DO NOTHING
@@ -91,7 +89,7 @@ export async function recordFillPnl(
     if (who.fee > 0n) {
       await sql`
         INSERT INTO "PnlEvent" (network, address, "marketId", kind, amount, size, price, ledger, "txHash", "refKey")
-        VALUES (${NETWORK}, ${who.address}, ${args.marketId}, 'FEE',
+        VALUES (${NETWORK.name}, ${who.address}, ${args.marketId}, 'FEE',
                 ${(-who.fee).toString()}, '0', ${args.fillPrice.toString()},
                 ${args.ledger}, ${args.txHash}, ${`${refKey}:fee`})
         ON CONFLICT (network, address, kind, "refKey") DO NOTHING

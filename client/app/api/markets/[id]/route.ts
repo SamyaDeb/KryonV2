@@ -34,7 +34,7 @@ export async function GET(
     return NextResponse.json(rows[0], {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (e) {
-    return NextResponse.json({ error: String(e) }, { status: 500 });
+  } catch {
+    return NextResponse.json({ error: "market_unavailable" }, { status: 500 });
   }
 }

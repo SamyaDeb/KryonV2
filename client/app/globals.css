@@ -48,46 +48,46 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Phoenix trading theme */
+/* Ghost-inspired trading theme */
 :root,
 .dark {
   color-scheme: dark;
-  --background: #070a14;
-  --foreground: #dde2ef;
-  --card: #0c1020;
-  --card-foreground: #dde2ef;
-  --popover: #0c1020;
-  --popover-foreground: #dde2ef;
-  --primary: #4f6ef7;
-  --primary-foreground: #ffffff;
-  --secondary: #141b30;
-  --secondary-foreground: #8891b8;
-  --muted: #101526;
-  --muted-foreground: #5a6585;
-  --accent: #1e2d55;
-  --accent-foreground: #a5b4fc;
+  --background: #19191A;
+  --foreground: #f5f5f5;
+  --card: #212128;
+  --card-foreground: #f5f5f5;
+  --popover: #212128;
+  --popover-foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --primary-foreground: #19191A;
+  --secondary: #212128;
+  --secondary-foreground: #f5f5f5;
+  --muted: #212128;
+  --muted-foreground: #a3a3a3;
+  --accent: #212128;
+  --accent-foreground: #f5f5f5;
   --destructive: #ff3858;
-  --border: #1a2240;
-  --input: #101526;
-  --ring: #4f6ef7;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.14);
+  --ring: #f5f5f5;
   --radius: 0.375rem;
-  --sidebar: #080b17;
-  --sidebar-foreground: #dde2ef;
-  --sidebar-primary: #4f6ef7;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #141b30;
-  --sidebar-accent-foreground: #dde2ef;
-  --sidebar-border: #1a2240;
-  --sidebar-ring: #4f6ef7;
+  --sidebar: #19191A;
+  --sidebar-foreground: #f5f5f5;
+  --sidebar-primary: #f5f5f5;
+  --sidebar-primary-foreground: #19191A;
+  --sidebar-accent: #212128;
+  --sidebar-accent-foreground: #f5f5f5;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #f5f5f5;
 
   /* Phoenix semantic tokens */
   --ph-long: #00d48a;
   --ph-long-dim: rgba(0, 212, 138, 0.12);
   --ph-short: #ff3858;
   --ph-short-dim: rgba(255, 56, 88, 0.12);
-  --ph-panel: #0c1020;
-  --ph-panel-alt: #080b17;
-  --ph-border: #1a2240;
+  --ph-panel: #212128;
+  --ph-panel-alt: #19191A;
+  --ph-border: rgba(255, 255, 255, 0.1);
   --ph-border-subtle: rgba(255, 255, 255, 0.05);
 }
 
@@ -106,8 +106,8 @@
 /* Slim dark scrollbars */
 ::-webkit-scrollbar { width: 4px; height: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #1e2a3a; border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: #2d3f55; }
+::-webkit-scrollbar-thumb { background: #2A2A31; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #525252; }
 
 /* Tabular number utility */
 .tabular {

@@ -23,6 +23,7 @@ export function OpenOrdersTable({
   const visible = orders.filter(
     (o) =>
       o.status === "pending" &&
+      o.owner === address &&
       (marketFilter === "all" || o.marketId === marketFilter) &&
       (sideFilter === "both" || (sideFilter === "long") === o.isLong)
   );
@@ -39,7 +40,7 @@ export function OpenOrdersTable({
   return (
     <table className="w-full text-[12px] tabular">
       <thead>
-        <tr className="text-[10px] text-[#5a5f67] font-semibold uppercase tracking-wider">
+        <tr className="text-[10px] text-[#737373] font-semibold uppercase tracking-wider">
           {cols.map((h, i) => (
             <th
               key={h || `act-${i}`}
@@ -58,12 +59,11 @@ export function OpenOrdersTable({
             onCancel={async () => {
               try {
                 await cancelOnChain(address, order.nonce);
-                cancelOrderOnMatcher(address, order.nonce);
-                cancelOrder(order.nonce);
+                await cancelOrderOnMatcher(address, order.nonce);
+                cancelOrder(order.nonce, address);
                 toast.success("Order cancelled");
-              } catch {
-                cancelOrder(order.nonce);
-                toast.info("Order cancelled locally");
+              } catch (e) {
+                toast.error(`Cancel failed: ${e instanceof Error ? e.message : String(e)}`);
               }
             }}
           />
@@ -96,29 +96,29 @@ function OrderRow({
     : "bg-[rgba(227,76,76,0.12)] text-[#e34c4c]";
 
   return (
-    <tr className="border-t border-[#1f232a] hover:bg-white/[0.02] transition-colors">
+    <tr className="border-t border-[#2A2A31] hover:bg-white/[0.02] transition-colors">
       <td className="pl-4 pr-2 py-[10px] text-left">
         <div className="flex items-center gap-2">
           {baseSymbol === "XLM" ? <XlmLogo size={16} /> : null}
-          <span className="font-semibold text-[#e6e6e6]">
+          <span className="font-semibold text-[#f5f5f5]">
             {baseSymbol}
-            <span className="text-[#5a5f67] font-normal">/USDC</span>
+            <span className="text-[#737373] font-normal">/USDC</span>
           </span>
         </div>
       </td>
-      <td className="px-3 py-[10px] text-right text-[#8a8f97]">{isMarket ? "Market" : "Limit"}</td>
+      <td className="px-3 py-[10px] text-right text-[#a3a3a3]">{isMarket ? "Market" : "Limit"}</td>
       <td className="px-3 py-[10px] text-right">
         <span className={`rounded-[5px] px-1.5 py-0.5 text-[10px] font-bold tracking-wide ${sideBadge}`}>
           {order.isLong ? "LONG" : "SHORT"}
         </span>
       </td>
-      <td className="px-3 py-[10px] text-right text-[#e6e6e6] font-medium">{sizeDisplay}</td>
-      <td className="px-3 py-[10px] text-right text-[#e6e6e6] font-medium">{priceDisplay}</td>
+      <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">{sizeDisplay}</td>
+      <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">{priceDisplay}</td>
       <td className="px-3 py-[10px] text-right">
         {order.reduceOnly ? (
-          <span className="text-[10px] border border-[#1f232a] text-[#8a8f97] px-1.5 py-0.5 rounded">Reduce</span>
+          <span className="text-[10px] border border-[#334155] text-[#a3a3a3] px-1.5 py-0.5 rounded">Reduce</span>
         ) : (
-          <span className="text-[#5a5f67]">—</span>
+          <span className="text-[#737373]">—</span>
         )}
       </td>
       <td className="px-3 py-[10px] text-right">
@@ -128,7 +128,7 @@ function OrderRow({
       </td>
       <td className="pr-4 pl-2 py-[10px] text-right">
         <button
-          className="px-3 py-1.5 text-[12px] font-semibold rounded-[6px] border border-[#1f232a] text-[#8a8f97] hover:text-[#e34c4c] hover:border-[#e34c4c]/40 hover:bg-[#e34c4c]/10 disabled:opacity-50 transition-colors"
+          className="px-3 py-1.5 text-[12px] font-semibold rounded-[6px] border border-[#334155] text-[#a3a3a3] hover:text-[#e34c4c] hover:border-[#e34c4c]/40 hover:bg-[#e34c4c]/10 disabled:opacity-50 transition-colors"
           disabled={cancelling}
           onClick={async () => {
             setCancelling(true);
@@ -145,11 +145,8 @@ function OrderRow({
 
 function Empty({ text }: { text: string }) {
   return (
-    <div className="flex flex-col items-center justify-center gap-2 py-10 text-[12px] text-[#5a6585]">
-      <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-        <path d="M7 7l10 10M17 7L7 17" />
-      </svg>
-      <span className="underline decoration-dotted underline-offset-4">{text}</span>
+    <div className="flex flex-col items-center gap-3 py-10 text-[#a3a3a3]">
+      <span className="text-[13px] text-[#a3a3a3]">{text}</span>
     </div>
   );
 }
