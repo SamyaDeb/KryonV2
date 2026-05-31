@@ -38,7 +38,7 @@ jobs:
         working-directory: kryon-protocol
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@1.89.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: wasm32v1-none
           components: rustfmt,clippy
