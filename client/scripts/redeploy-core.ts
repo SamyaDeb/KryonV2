@@ -46,7 +46,7 @@ const WASM: Record<string, string> = {
 };
 
 // Existing contracts we keep (already controlled by our key or unchanged)
-const ORACLE_ADAPTER = "CDC342E2GSLQKPHNWOWYUKNMSBES2OOTRHKA7YZO77SCZEN6XDQ334MD";
+const ORACLE_ADAPTER = "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP";
 const USDC_CONTRACT  = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
 
 // Market constants (from original deployment config)
@@ -300,7 +300,7 @@ async function main() {
 
   console.log("Step 5 — Patching config files");
 
-  const configPath = path.resolve(__dirname, "../lib/config.ts");
+  const configPath = path.resolve(__dirname, "../config/index.ts");
   let configSrc = fs.readFileSync(configPath, "utf8");
 
   const patches: [RegExp, string][] = [

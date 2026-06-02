@@ -1,0 +1,7 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile.services"
+
+[deploy]
+restartPolicyType = "always"
+restartPolicyMaxRetries = 10

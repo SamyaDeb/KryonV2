@@ -5,8 +5,11 @@ type CheckResult = {
   ms: number;
 };
 
+// On testnet the WS server runs locally — allow ws: as well as wss:
+const IS_TESTNET = process.env.NEXT_PUBLIC_STELLAR_NETWORK === "testnet";
+
 const APP_URL = requiredUrl("NEXT_PUBLIC_APP_URL", process.env.NEXT_PUBLIC_APP_URL);
-const WS_URL = requiredUrl("NEXT_PUBLIC_WS_URL", process.env.NEXT_PUBLIC_WS_URL, "wss:");
+const WS_URL = requiredWsUrl("NEXT_PUBLIC_WS_URL", process.env.NEXT_PUBLIC_WS_URL);
 const MARKET_ID = Number(process.env.LIVE_GATE_MARKET_ID ?? "1");
 const WS_CONNECTIONS = Number(process.env.LIVE_GATE_WS_CONNECTIONS ?? "25");
 const SOAK_SECONDS = Number(process.env.LIVE_GATE_SOAK_SECONDS ?? "30");
@@ -20,6 +23,14 @@ function requiredUrl(key: string, value: string | undefined, protocol = "https:"
   if (!value) fail(`${key} is required`);
   const url = new URL(value);
   if (url.protocol !== protocol) fail(`${key} must use ${protocol}`);
+  return url;
+}
+
+function requiredWsUrl(key: string, value: string | undefined): URL {
+  if (!value) fail(`${key} is required`);
+  const url = new URL(value);
+  const allowed = IS_TESTNET ? ["wss:", "ws:"] : ["wss:"];
+  if (!allowed.includes(url.protocol)) fail(`${key} must use wss: (or ws: on testnet)`);
   return url;
 }
 

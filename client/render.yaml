@@ -1,0 +1,110 @@
+services:
+  - type: web
+    name: kryon-ws-server
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/ws-server.ts
+    plan: free
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: NEXT_PUBLIC_ACTIVE_MARKETS
+        value: XLM-PERP
+      - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
+        value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
+      - key: NEXT_PUBLIC_CONTRACT_VAULT
+        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+      - key: NEXT_PUBLIC_CONTRACT_ENGINE
+        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+      - key: NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY
+        value: CA5ZKC7XOKCTQJ6NA5S4SFT54V25YQYUZL66CGUYYAWUXLTCHITNY2O3
+      - key: NEXT_PUBLIC_ASSET_NATIVE_XLM
+        value: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+      - key: NEXT_PUBLIC_ASSET_USDC
+        value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+      - key: DATABASE_URL
+        sync: false   # set in Render dashboard — do not commit secrets
+
+  - type: worker
+    name: kryon-oracle-keeper
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/oracle-keeper.ts
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: NEXT_PUBLIC_ACTIVE_MARKETS
+        value: XLM-PERP
+      - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
+        value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
+      - key: ORACLE_PUBLISHER_SECRET
+        sync: false
+
+  - type: worker
+    name: kryon-matcher
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/matcher-service.ts
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: NEXT_PUBLIC_ACTIVE_MARKETS
+        value: XLM-PERP
+      - key: NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY
+        value: CA5ZKC7XOKCTQJ6NA5S4SFT54V25YQYUZL66CGUYYAWUXLTCHITNY2O3
+      - key: NEXT_PUBLIC_CONTRACT_ENGINE
+        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+      - key: NEXT_PUBLIC_CONTRACT_VAULT
+        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+      - key: MATCHER_OPERATOR_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+
+  - type: worker
+    name: kryon-state-indexer
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/state-indexer.ts
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: NEXT_PUBLIC_ACTIVE_MARKETS
+        value: XLM-PERP
+      - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
+        value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
+      - key: NEXT_PUBLIC_CONTRACT_ENGINE
+        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+      - key: NEXT_PUBLIC_CONTRACT_VAULT
+        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+      - key: DATABASE_URL
+        sync: false
