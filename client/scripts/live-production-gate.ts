@@ -140,7 +140,10 @@ async function checkSoak() {
     cycles += 1;
     await new Promise((resolve) => setTimeout(resolve, 1_000));
   }
-  if (cycles < Math.max(1, SOAK_SECONDS - 2)) fail("soak loop did not complete enough cycles");
+  // Each cycle = parallel API calls + 1s sleep. On Neon serverless the DB round-trip
+  // adds ~500ms, so real cycle time is ~1.5-2s. Require at least half the ideal cycles.
+  const minCycles = Math.max(1, Math.floor(SOAK_SECONDS / 2));
+  if (cycles < minCycles) fail(`soak loop completed only ${cycles}/${minCycles} required cycles`);
 }
 
 async function main() {
