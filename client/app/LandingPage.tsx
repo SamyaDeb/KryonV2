@@ -13,6 +13,7 @@ const LANDING_NAV = [
   { to: '/trade/XLM-PERP', label: 'Trade' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/leaderboard', label: 'Leaderboard' },
+  { to: 'https://docs.kryon.xyz', label: 'Docs' },
 ];
 
 const SYSTEM_STATUS = [
