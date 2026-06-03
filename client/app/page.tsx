@@ -1,6 +1,5 @@
-import { redirect } from "next/navigation";
-import { DEFAULT_MARKET_SYMBOL } from "@/config";
+import { LandingPage } from "./LandingPage";
 
 export default function Home() {
-  redirect(`/trade/${DEFAULT_MARKET_SYMBOL}`);
+  return <LandingPage />;
 }

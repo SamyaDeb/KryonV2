@@ -21,7 +21,7 @@ export function TopNav() {
   return (
     <header className="flex items-center justify-between px-[14px] py-[6px] border-b border-[#2A2A31] shrink-0 bg-[#212128]">
       <div className="flex items-center gap-[12px]">
-        <Link href={`/trade/${DEFAULT_MARKET_SYMBOL}`} className="flex items-center gap-[8px] select-none">
+        <Link href="/" className="flex items-center gap-[8px] select-none">
           <Image src="/logo.png" alt="Kryon" width={36} height={11} priority className="object-contain" />
           <span
             className="text-[18px] font-bold text-[#f5f5f5]"
