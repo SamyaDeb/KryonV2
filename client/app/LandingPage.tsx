@@ -210,10 +210,10 @@ export function LandingPage() {
   const { connected, connecting, setConnecting, setAddress, setConnected, setWrongNetwork } = useWalletStore();
 
   const [activeStatus, setActiveStatus] = useState(0);
-  const [binaryRows, setBinaryRows] = useState<string[]>(() => Array.from({ length: 9 }, () => '00000000  00000000  00000000'));
+  const [binaryRows, setBinaryRows] = useState<string[]>(() => Array.from({ length: 9 }, genBinaryBlock));
   const [menuOpen, setMenuOpen] = useState(false);
-  const [graphH, setGraphH] = useState(0.45);
-  const [graphPoints, setGraphPoints] = useState<number[]>([35, 28, 38, 22, 40, 30, 35]);
+  const [graphH, setGraphH] = useState(() => 0.25 + Math.random() * 0.65);
+  const [graphPoints, setGraphPoints] = useState<number[]>(() => Array.from({ length: 7 }, () => 5 + Math.random() * 35));
   const [cardIdx, setCardIdx] = useState(CAROUSEL_CLONES);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [ftEmail, setFtEmail] = useState('');
@@ -223,6 +223,7 @@ export function LandingPage() {
   const [scrollY, setScrollY] = useState(0);
   const [mounted, setMounted] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
@@ -254,9 +255,6 @@ export function LandingPage() {
   }, []);
 
   useEffect(() => {
-    setBinaryRows(Array.from({ length: 9 }, genBinaryBlock));
-    setGraphH(0.25 + Math.random() * 0.65);
-    setGraphPoints(Array.from({ length: 7 }, () => 5 + Math.random() * 35));
     const t = setInterval(() => {
       setBinaryRows(Array.from({ length: 9 }, genBinaryBlock));
       setGraphH(0.25 + Math.random() * 0.65);

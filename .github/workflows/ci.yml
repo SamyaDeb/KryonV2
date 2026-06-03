@@ -56,6 +56,9 @@ jobs:
     defaults:
       run:
         working-directory: kryon-protocol
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/kryon
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/kryon
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

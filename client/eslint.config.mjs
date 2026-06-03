@@ -12,11 +12,8 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
-    "scripts/test-*.ts",
-    "scripts/redeploy-*.ts",
-    "scripts/setup-*.ts",
-    "scripts/check-*.ts",
-    "scripts/diag-*.ts",
+    // Operational scripts are not app code
+    "scripts/**",
   ]),
 ]);
 

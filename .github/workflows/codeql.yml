@@ -20,25 +20,16 @@ jobs:
   analyze:
     name: analyze javascript-typescript
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client
+    # Non-blocking until GitHub Code Scanning is enabled in repo Settings → Security
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
 
       - uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
-          build-mode: manual
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
-      - run: npm ci
-      - run: npm run build
+          # JS/TS doesn't require compilation; none is correct and faster
+          build-mode: none
 
       - uses: github/codeql-action/analyze@v4
         with:
