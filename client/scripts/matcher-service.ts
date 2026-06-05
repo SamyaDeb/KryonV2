@@ -22,12 +22,8 @@ import { neon, neonConfig, type NeonQueryFunction } from "@neondatabase/serverle
 // Keep fetch connections alive — prevents "fetch failed" on Neon serverless
 // after idle periods by re-establishing the HTTP connection as needed.
 neonConfig.fetchConnectionCache = true;
-import {
-  Account, Keypair, Contract, TransactionBuilder,
-  nativeToScVal, scValToNative, xdr, rpc,
-} from "@stellar/stellar-sdk";
-import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
-import { simulateSettleFill } from "../lib/stellar/settlement";
+import { ACTIVE_MARKETS, NETWORK } from "../config";
+import { simulateSettleFill, submitSettleFillSigned } from "../lib/stellar/settlement";
 
 type Sql = NeonQueryFunction<false, false>;
 
@@ -35,54 +31,7 @@ const POLL_INTERVAL_MS = 1_000;
 const NETWORK_NAME = NETWORK.name;
 const PRICE_PRECISION = 1e18;
 const AMOUNT_PRECISION = 1e7;
-// Mirror the engine's max_execution_deviation_bps so we never produce a fill the
-// on-chain settle_fill would reject with PriceOutsideBand (#16). Configured to
-// match the deployed engine (500 = 5%); override via env if the engine changes.
-const EXECUTION_DEVIATION_BPS = BigInt(process.env.MATCHER_EXECUTION_DEVIATION_BPS ?? "500");
-const MATCHER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
-  id: m.marketId,
-  symbol: m.symbol,
-  oracleSymbol: m.oracleSymbol,
-}));
-
-// ── Oracle price (for execution-band pre-filter) ──────────────────────────────
-// Read-only simulation against the oracle adapter; mirrors the on-chain band
-// check so out-of-band (stale/mispriced) orders never get matched + settled.
-
-const _oracleServer = new rpc.Server(NETWORK.rpcUrl);
-const _oracleKp = Keypair.random();
-
-async function getOraclePrice(oracleSymbol: string): Promise<bigint | null> {
-  try {
-    const acct = new Account(_oracleKp.publicKey(), "100");
-    const tx = new TransactionBuilder(acct, { fee: "500000", networkPassphrase: NETWORK.passphrase })
-      .addOperation(
-        new Contract(CONTRACTS.oracleAdapter).call(
-          "get_price",
-          nativeToScVal(oracleSymbol, { type: "symbol" }),
-          xdr.ScVal.scvVoid()
-        )
-      )
-      .setTimeout(60)
-      .build();
-    const sim = await _oracleServer.simulateTransaction(tx);
-    if (rpc.Api.isSimulationError(sim)) return null;
-    const retval = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
-    if (!retval) return null;
-    const snapshot = scValToNative(retval) as { price?: string | bigint };
-    return snapshot?.price != null ? BigInt(snapshot.price) : null;
-  } catch {
-    return null;
-  }
-}
-
-// Is a fill price within oracle ± EXECUTION_DEVIATION_BPS? (oracle null → allow,
-// let on-chain simulation be the gate.)
-function withinBand(fillPrice: bigint, oracle: bigint | null): boolean {
-  if (oracle == null || oracle <= 0n) return true;
-  const maxDelta = (oracle * EXECUTION_DEVIATION_BPS) / 10_000n;
-  return fillPrice >= oracle - maxDelta && fillPrice <= oracle + maxDelta;
-}
+const MATCHER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({ id: m.marketId, symbol: m.symbol }));
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,6 +47,7 @@ interface RestingOrder {
   expiryTs: bigint;
   filledSize: bigint;
   createdAt: Date;
+  signature: string | null;
 }
 
 interface MatchResult {
@@ -122,6 +72,7 @@ function mapOrderRow(r: Record<string, unknown>): RestingOrder {
     expiryTs:   BigInt(r.expiryTs as string),
     filledSize: BigInt(r.filledSize as string),
     createdAt:  new Date(r.createdAt as string),
+    signature:  r.signature != null ? String(r.signature) : null,
   };
 }
 
@@ -132,7 +83,7 @@ async function loadRestingOrders(sql: Sql, marketId: number): Promise<RestingOrd
       id, owner, "marketId", "isLong",
       size::text, "limitPrice"::text, "reduceOnly",
       nonce::text, "expiryTs"::text, "filledSize"::text,
-      "createdAt"
+      "createdAt", signature
     FROM "Order"
     WHERE
       "marketId"   = ${marketId}
@@ -152,7 +103,7 @@ async function loadMarketOrders(sql: Sql, marketId: number): Promise<RestingOrde
       id, owner, "marketId", "isLong",
       size::text, "limitPrice"::text, "reduceOnly",
       nonce::text, "expiryTs"::text, "filledSize"::text,
-      "createdAt"
+      "createdAt", signature
     FROM "Order"
     WHERE
       "marketId"   = ${marketId}
@@ -297,19 +248,27 @@ async function persistFill(sql: Sql, match: MatchResult): Promise<boolean> {
     // If DO NOTHING fired (duplicate fill), skip the filledSize updates
     if (!inserted || inserted.length === 0) return false;
 
-    // Update filledSize on both orders
-    await sql`
+    // H3: Atomic filledSize increment — read-modify-write in a single statement.
+    // The WHERE guard ensures we never overflow size (treats as duplicate if it would).
+    const makerUpdated = await sql`
       UPDATE "Order"
       SET "filledSize" = ("filledSize"::numeric + ${fillSize.toString()}::numeric)::text,
           "updatedAt"  = NOW()
       WHERE id = ${maker.id}
+        AND "filledSize"::numeric + ${fillSize.toString()}::numeric <= size::numeric
+      RETURNING id
     `;
-    await sql`
+    if (!makerUpdated || makerUpdated.length === 0) return false;
+
+    const takerUpdated = await sql`
       UPDATE "Order"
       SET "filledSize" = ("filledSize"::numeric + ${fillSize.toString()}::numeric)::text,
           "updatedAt"  = NOW()
       WHERE id = ${taker.id}
+        AND "filledSize"::numeric + ${fillSize.toString()}::numeric <= size::numeric
+      RETURNING id
     `;
+    if (!takerUpdated || takerUpdated.length === 0) return false;
 
     // Update Market.lastPrice and volume
     const fillValue = (fillSize * fillPrice) / BigInt(Math.round(PRICE_PRECISION));
@@ -370,6 +329,51 @@ async function executeSettlement(sql: Sql, match: MatchResult): Promise<boolean>
   if (!feePayerSecret) return false;
 
   const fillHash = pseudoTxHash(match.maker, match.taker, match.fillSize);
+
+  // C2 fast path: both parties have stored settlement signatures — submit directly.
+  if (match.maker.signature && match.taker.signature) {
+    const txHash = await submitSettleFillSigned({
+      maker: {
+        owner:      match.maker.owner,
+        marketId:   match.maker.marketId,
+        isLong:     match.maker.isLong,
+        size:       match.maker.size,
+        limitPrice: match.maker.limitPrice,
+        reduceOnly: match.maker.reduceOnly,
+        nonce:      match.maker.nonce,
+        expiryTs:   match.maker.expiryTs,
+      },
+      taker: {
+        owner:      match.taker.owner,
+        marketId:   match.taker.marketId,
+        isLong:     match.taker.isLong,
+        size:       match.taker.size,
+        limitPrice: match.taker.limitPrice,
+        reduceOnly: match.taker.reduceOnly,
+        nonce:      match.taker.nonce,
+        expiryTs:   match.taker.expiryTs,
+      },
+      fillSize:      match.fillSize,
+      fillPrice:     match.fillPrice,
+      fillHash,
+      feePayerSecret,
+      makerSig: match.maker.signature,
+      takerSig: match.taker.signature,
+    });
+
+    if (txHash) {
+      process.stdout.write(`  ✓ settled signed: ${txHash.slice(0, 12)}...\n`);
+      await sql`
+        INSERT INTO "TxJob" (network, kind, "payloadHash", "unsignedXdr", status, "submittedHash", "nextAttemptAt", "createdAt", "updatedAt")
+        VALUES (${NETWORK_NAME}, 'settle_fill', ${fillHash}, '{}', 'CONFIRMED', ${txHash}, NOW(), NOW(), NOW())
+        ON CONFLICT (network, kind, "payloadHash") DO UPDATE SET status = 'CONFIRMED', "submittedHash" = EXCLUDED."submittedHash", "updatedAt" = NOW()
+      `;
+      return true;
+    }
+    return false;
+  }
+
+  // Fallback: auth-entry queue (old path for orders without stored signatures).
   const pending = await simulateSettleFill({
     maker: {
       owner:      match.maker.owner,
@@ -445,18 +449,8 @@ async function tick(sql: Sql) {
     ]);
     if (limitOrders.length === 0 && marketOrders.length === 0) continue;
 
-    // Fetch oracle once per market to pre-filter out-of-band fills. Stale or
-    // mispriced orders (e.g. resting far from current oracle) would otherwise
-    // match, fail settle_fill with PriceOutsideBand, and roll back every tick.
-    const oracle = await getOraclePrice(market.oracleSymbol);
-
     const matches = matchAll(limitOrders, marketOrders);
     for (const match of matches) {
-      if (!withinBand(match.fillPrice, oracle)) {
-        // Skip silently — these are stale/mispriced orders the engine would
-        // reject. They stay in the book but never produce failing settlements.
-        continue;
-      }
       const ok = await persistFill(sql, match);
       if (ok) {
         totalFills++;

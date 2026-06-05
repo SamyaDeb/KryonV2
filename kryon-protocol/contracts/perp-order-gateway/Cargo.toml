@@ -20,3 +20,7 @@ perp-engine = { workspace = true }
 perp-oracle-adapter = { workspace = true }
 perp-vault = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
+# Real-crypto test vectors: sign canonical order messages exactly as a wallet
+# would, then assert the on-chain ed25519 verification accepts them.
+ed25519-dalek = { version = "2.2.0", default-features = false }
+sha2 = { version = "0.10.9", default-features = false }

@@ -257,6 +257,13 @@ async function main() {
   account = await callContract(server, kp, account, vaultId, "set_collateral",
     [addr(USDC_CONTRACT), xdr.ScVal.scvSymbol("USDC"), u32(0), xdr.ScVal.scvBool(true)], "vault.set_collateral(USDC)");
 
+  // C2 liveness: set the settlement domain so the gateway can reconstruct the
+  // canonical message and verify maker/taker signatures on-chain.
+  // Domain = network passphrase bytes (prevents cross-network replay).
+  const domainBytes = Buffer.from(NETWORK, "utf8");
+  account = await callContract(server, kp, account, gatewayId, "set_domain",
+    [xdr.ScVal.scvBytes(domainBytes)], "gateway.set_domain");
+
   console.log("");
 
   // ── Configure XLM-PERP market ────────────────────────────────────────────

@@ -10,6 +10,7 @@ pub enum DataKey {
     Admin,
     PendingAdmin,
     Liquidation,
+    Vault,
     Balance(Address),
     BadDebt(Address),
 }
@@ -36,6 +37,15 @@ impl PerpInsuranceContract {
         env.storage()
             .instance()
             .set(&DataKey::Liquidation, &liquidation);
+        Ok(())
+    }
+
+    /// Register the vault that is authorized to pull deficit coverage and record
+    /// uncovered bad debt. The vault is the only party that knows a user's exact
+    /// negative balance, so it — not the liquidation contract — drives coverage.
+    pub fn set_vault(env: Env, vault: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Vault, &vault);
         Ok(())
     }
 
@@ -94,8 +104,29 @@ impl PerpInsuranceContract {
         Ok(next)
     }
 
+    /// Cover an account deficit by transferring up to `amount` of `asset` to the
+    /// vault. Returns the amount actually covered (capped by the fund balance).
+    /// Only the registered vault may call this — it pulls real tokens into vault
+    /// reserves so the vault can credit the underwater account back toward zero,
+    /// keeping Σ(internal balances) ≤ token reserves.
+    pub fn cover_deficit(env: Env, asset: Address, amount: i128) -> Result<i128, CoreError> {
+        let vault = require_vault(&env)?;
+        if amount <= 0 {
+            return Err(CoreError::InvalidAmount);
+        }
+        let balance = balance_of(env.clone(), asset.clone());
+        let covered = if balance < amount { balance } else { amount };
+        if covered <= 0 {
+            return Ok(0);
+        }
+        decrease_balance(&env, &asset, covered)?;
+        let insurance = env.current_contract_address();
+        token::Client::new(&env, &asset).transfer(&insurance, &vault, &covered);
+        Ok(covered)
+    }
+
     pub fn record_bad_debt(env: Env, asset: Address, amount: i128) -> Result<i128, CoreError> {
-        require_liquidation(&env)?;
+        require_vault(&env)?;
         if amount <= 0 {
             return Err(CoreError::InvalidAmount);
         }
@@ -134,6 +165,16 @@ fn require_liquidation(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::InvalidConfig)?;
     liquidation.require_auth();
     Ok(liquidation)
+}
+
+fn require_vault(env: &Env) -> Result<Address, CoreError> {
+    let vault: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Vault)
+        .ok_or(CoreError::InvalidConfig)?;
+    vault.require_auth();
+    Ok(vault)
 }
 
 fn balance_of(env: Env, asset: Address) -> i128 {

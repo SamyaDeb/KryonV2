@@ -1,6 +1,7 @@
 use protocol_core::{
     add_signed, apply_bps, checked_add, checked_sub, collateral_value_after_haircut, funding_pnl,
-    notional, signed_position_pnl, AccountSnapshot, CoreError, MarketSnapshot, PRECISION,
+    notional, signed_position_pnl, AccountSnapshot, CoreError, MarginMode, MarketSnapshot,
+    PRECISION,
 };
 use soroban_sdk::{contracttype, Env, Map};
 
@@ -22,21 +23,24 @@ pub fn account_health(
     account: &AccountSnapshot,
     markets: &Map<u32, MarketSnapshot>,
 ) -> Result<AccountHealth, CoreError> {
-    let mut collateral_value = 0i128;
+    let mut total_collateral_value = 0i128;
     for c in account.collateral.iter() {
-        collateral_value = checked_add(
-            collateral_value,
+        total_collateral_value = checked_add(
+            total_collateral_value,
             collateral_value_after_haircut(c.value, c.haircut_bps)?,
         )?;
     }
 
-    let mut unrealized_pnls = [0i128; 64];
+    // First pass: collect per-position pnl and margin info
+    let mut pnl_buf = [0i128; 64];
     let mut pnl_count = 0usize;
     let mut initial = 0i128;
     let mut maintenance = 0i128;
+    let mut locked_isolated_margin = 0i128;
+    let mut any_isolated_liquidatable = false;
 
     for p in account.positions.iter() {
-        if pnl_count >= unrealized_pnls.len() {
+        if pnl_count >= pnl_buf.len() {
             return Err(CoreError::InvalidConfig);
         }
         let market = markets.get(p.market_id).ok_or(CoreError::InvalidConfig)?;
@@ -50,7 +54,8 @@ pub fn account_health(
         };
         let trade_pnl = signed_position_pnl(&p, market.oracle_price)?;
         let f_pnl = funding_pnl(&p, current_funding)?;
-        unrealized_pnls[pnl_count] = checked_add(trade_pnl, f_pnl)?;
+        let upnl = checked_add(trade_pnl, f_pnl)?;
+        pnl_buf[pnl_count] = upnl;
         pnl_count += 1;
 
         let n = notional(p.size, market.oracle_price)?;
@@ -59,10 +64,50 @@ pub fn account_health(
             maintenance,
             apply_bps(n, market.config.maintenance_margin_bps)?,
         )?;
+
+        if p.mode == MarginMode::Isolated {
+            locked_isolated_margin = checked_add(locked_isolated_margin, p.margin)?;
+            // Isolated position is liquidatable when its own equity < its own maintenance margin
+            let iso_maintenance = apply_bps(n, market.config.maintenance_margin_bps)?;
+            let iso_equity = checked_add(p.margin, upnl)?;
+            if iso_maintenance > 0 && iso_equity < iso_maintenance {
+                any_isolated_liquidatable = true;
+            }
+        }
     }
 
-    let unrealized_pnl = add_signed(&unrealized_pnls[..pnl_count])?;
-    let equity = checked_add(collateral_value, unrealized_pnl)?;
+    // Cross collateral = total collateral minus margin locked in isolated positions.
+    // May be negative when cross losses have depleted the balance — that is the
+    // underwater signal; do NOT clamp to 0 or the equity check won't fire.
+    let cross_collateral = checked_sub(total_collateral_value, locked_isolated_margin)?;
+
+    // Second pass: compute isolated equity contribution and cross unrealized pnl separately
+    let mut isolated_equity = 0i128;
+    let mut cross_unrealized = 0i128;
+    let mut idx = 0usize;
+    for p in account.positions.iter() {
+        let upnl = pnl_buf[idx];
+        idx += 1;
+        if p.mode == MarginMode::Isolated {
+            // Isolated position's contribution to equity is capped at 0 on the downside
+            // (losses beyond the locked margin cannot consume cross collateral)
+            let pos_equity = checked_add(p.margin, upnl)?;
+            isolated_equity = checked_add(
+                isolated_equity,
+                if pos_equity > 0 { pos_equity } else { 0 },
+            )?;
+        } else {
+            cross_unrealized = checked_add(cross_unrealized, upnl)?;
+        }
+    }
+
+    let unrealized_pnl = add_signed(&pnl_buf[..pnl_count])?;
+
+    // Total equity = free cross collateral + cross unrealized pnl + sum of isolated equities
+    let equity = checked_add(
+        checked_add(cross_collateral, cross_unrealized)?,
+        isolated_equity,
+    )?;
     let free_collateral = checked_sub(equity, initial)?;
     let margin_ratio = if maintenance > 0 {
         protocol_core::div_precision(equity, maintenance)?
@@ -70,15 +115,29 @@ pub fn account_health(
         i128::MAX
     };
 
+    // Cross positions are liquidatable when cross equity < cross maintenance requirement
+    let mut cross_maintenance = 0i128;
+    for p in account.positions.iter() {
+        if p.mode == MarginMode::Cross {
+            let market = markets.get(p.market_id).ok_or(CoreError::InvalidConfig)?;
+            let n = notional(p.size, market.oracle_price)?;
+            cross_maintenance =
+                checked_add(cross_maintenance, apply_bps(n, market.config.maintenance_margin_bps)?)?;
+        }
+    }
+    let cross_equity = checked_add(cross_collateral, cross_unrealized)?;
+    let cross_liquidatable = cross_maintenance > 0 && cross_equity < cross_maintenance;
+    let liquidatable = cross_liquidatable || any_isolated_liquidatable;
+
     Ok(AccountHealth {
-        collateral_value,
+        collateral_value: total_collateral_value,
         unrealized_pnl,
         equity,
         initial_margin_required: initial,
         maintenance_margin_required: maintenance,
         free_collateral,
         margin_ratio,
-        liquidatable: maintenance > 0 && equity < maintenance,
+        liquidatable,
     })
 }
 
@@ -123,10 +182,31 @@ mod tests {
     };
     use soroban_sdk::{testutils::Address as _, Address, Env, Symbol, Vec};
 
+    fn make_market(env: &Env, market_id: u32, oracle_price: i128) -> MarketSnapshot {
+        let market_token = Address::generate(env);
+        MarketSnapshot {
+            config: MarketConfig {
+                market_id,
+                base_asset: Symbol::new(env, "BTC"),
+                settlement_asset: market_token,
+                max_leverage_bps: 100_000,
+                initial_margin_bps: 1_000,
+                maintenance_margin_bps: 500,
+                liquidation_fee_bps: 50,
+                max_open_interest: 10_000 * PRECISION,
+                max_oracle_age_secs: 10,
+                max_oracle_confidence_bps: 50,
+                active: true,
+            },
+            oracle_price,
+            funding_index_long: 0,
+            funding_index_short: 0,
+        }
+    }
+
     fn setup_account(env: &Env, mark: i128) -> (AccountSnapshot, Map<u32, MarketSnapshot>) {
         let user = Address::generate(env);
         let token = Address::generate(env);
-        let market_token = Address::generate(env);
         let collateral = Vec::from_array(
             env,
             [CollateralBalance {
@@ -156,27 +236,7 @@ mod tests {
             positions,
         };
         let mut markets = Map::new(env);
-        markets.set(
-            1,
-            MarketSnapshot {
-                config: MarketConfig {
-                    market_id: 1,
-                    base_asset: Symbol::new(env, "BTC"),
-                    settlement_asset: market_token,
-                    max_leverage_bps: 100_000,
-                    initial_margin_bps: 1_000,
-                    maintenance_margin_bps: 500,
-                    liquidation_fee_bps: 50,
-                    max_open_interest: 10_000 * PRECISION,
-                    max_oracle_age_secs: 10,
-                    max_oracle_confidence_bps: 50,
-                    active: true,
-                },
-                oracle_price: mark,
-                funding_index_long: 0,
-                funding_index_short: 0,
-            },
-        );
+        markets.set(1, make_market(env, 1, mark));
         (account, markets)
     }
 
@@ -187,5 +247,126 @@ mod tests {
         let health = account_health(&env, &account, &markets).unwrap();
         assert_eq!(health.unrealized_pnl, -900 * PRECISION);
         assert!(validate_withdrawal(&env, &account, &markets, 900 * PRECISION).is_err());
+    }
+
+    #[test]
+    fn isolated_position_loss_capped_at_locked_margin() {
+        // Isolated position with margin=100, position size=10 BTC at entry 100.
+        // Price drops to 1 → unrealized pnl = -990 * PRECISION.
+        // Isolated equity = max(0, 100 + (-990)) = max(0, -890) = 0.
+        // Total collateral = 1000. Locked isolated = 100.
+        // Cross collateral = 1000 - 100 = 900.
+        // No cross positions → cross_unrealized = 0.
+        // Total equity = 900 + 0 + 0 = 900.
+        let env = Env::default();
+        let user = Address::generate(&env);
+        let token = Address::generate(&env);
+        let collateral = Vec::from_array(
+            &env,
+            [CollateralBalance {
+                asset: token,
+                amount: 1_000 * PRECISION,
+                value: 1_000 * PRECISION,
+                haircut_bps: 0,
+            }],
+        );
+        let positions = Vec::from_array(
+            &env,
+            [Position {
+                position_id: 1,
+                owner: user.clone(),
+                market_id: 1,
+                size: 10 * PRECISION,
+                entry_price: 100 * PRECISION,
+                margin: 100 * PRECISION,
+                is_long: true,
+                last_funding_index: 0,
+                mode: MarginMode::Isolated,
+            }],
+        );
+        let account = AccountSnapshot {
+            owner: user,
+            collateral,
+            positions,
+        };
+        let mut markets = Map::new(&env);
+        markets.set(1, make_market(&env, 1, 1 * PRECISION));
+        let health = account_health(&env, &account, &markets).unwrap();
+        // unrealized pnl = (1 - 100) * 10 = -990
+        assert_eq!(health.unrealized_pnl, -990 * PRECISION);
+        // equity should be 900 (cross collateral only; isolated pos equity capped at 0)
+        assert_eq!(health.equity, 900 * PRECISION);
+        // isolated pos is liquidatable (iso_equity = 100 + (-990) = -890 < iso_maintenance)
+        assert!(health.liquidatable);
+    }
+
+    #[test]
+    fn isolated_does_not_contaminate_cross_health() {
+        // One isolated position fully underwater, one cross position healthy.
+        // Cross health should be fine; overall liquidatable=true due to isolated.
+        let env = Env::default();
+        let user = Address::generate(&env);
+        let token = Address::generate(&env);
+        // 2000 collateral total
+        let collateral = Vec::from_array(
+            &env,
+            [CollateralBalance {
+                asset: token,
+                amount: 2_000 * PRECISION,
+                value: 2_000 * PRECISION,
+                haircut_bps: 0,
+            }],
+        );
+        // Isolated position: 10 BTC long, entry 100, margin 100, price drops to 1 → fully wiped
+        // Cross position: 1 BTC long, entry 100, price = 100 → pnl = 0
+        let positions = Vec::from_array(
+            &env,
+            [
+                Position {
+                    position_id: 1,
+                    owner: user.clone(),
+                    market_id: 1,
+                    size: 10 * PRECISION,
+                    entry_price: 100 * PRECISION,
+                    margin: 100 * PRECISION,
+                    is_long: true,
+                    last_funding_index: 0,
+                    mode: MarginMode::Isolated,
+                },
+                Position {
+                    position_id: 2,
+                    owner: user.clone(),
+                    market_id: 2,
+                    size: 1 * PRECISION,
+                    entry_price: 100 * PRECISION,
+                    margin: 0,
+                    is_long: true,
+                    last_funding_index: 0,
+                    mode: MarginMode::Cross,
+                },
+            ],
+        );
+        let account = AccountSnapshot {
+            owner: user,
+            collateral,
+            positions,
+        };
+        let mut markets = Map::new(&env);
+        // Isolated market: price crashed
+        markets.set(1, make_market(&env, 1, 1 * PRECISION));
+        // Cross market: price at par
+        markets.set(2, make_market(&env, 2, 100 * PRECISION));
+        let health = account_health(&env, &account, &markets).unwrap();
+
+        // Cross position: notional = 1 * 100 = 100, maintenance = 100 * 500/10000 = 5
+        // Cross collateral = 2000 - 100 (locked isolated) = 1900
+        // Cross unrealized = 0 (price at entry)
+        // Cross equity = 1900 > cross maintenance = 5 → cross NOT liquidatable
+        // Isolated: iso_equity = 100 + (-990) = -890 < iso_maintenance → isolated IS liquidatable
+        assert!(health.liquidatable);
+
+        // Verify cross portion is healthy: equity >> maintenance
+        // Total equity = 1900 (cross) + 0 (isolated capped) = 1900
+        assert_eq!(health.equity, 1_900 * PRECISION);
     }
 }

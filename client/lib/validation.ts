@@ -2,8 +2,8 @@
 // payloads out of the DB and the matcher. Pure functions — no I/O.
 
 import { StrKey } from "@stellar/stellar-sdk";
-import { ACTIVE_MARKETS, AMOUNT_PRECISION, PRICE_PRECISION } from "@/config";
-import { assertU64, orderSigningMessage } from "@/lib/market/signing-message";
+import { ACTIVE_MARKETS, AMOUNT_PRECISION, NETWORK, PRICE_PRECISION } from "@/config";
+import { assertU64, orderSettlementMessage, pubkeyHexFromAddress } from "@/lib/market/signing-message";
 import { verifySignedMessage } from "@/lib/market/signed-intent";
 
 const VALID_MARKET_IDS = new Set(Object.values(ACTIVE_MARKETS).map((m) => m.marketId));
@@ -93,7 +93,8 @@ export function validateOrderIntent(body: unknown): ValidationResult {
     nonce: nonce.toString(),
     expiry_ts: expiryTs.toString(),
   };
-  if (!verifySignedMessage(b.owner, orderSigningMessage(signed), b.signature)) {
+  const pubkeyHex = pubkeyHexFromAddress(b.owner);
+  if (!verifySignedMessage(b.owner, orderSettlementMessage(NETWORK.passphrase, pubkeyHex, signed), b.signature)) {
     return { ok: false, error: "Invalid order signature" };
   }
 

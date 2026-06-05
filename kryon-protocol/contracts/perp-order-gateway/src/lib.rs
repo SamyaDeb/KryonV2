@@ -15,6 +15,7 @@ pub enum DataKey {
     Operator,
     Filled(Address, u64),
     Cancelled(Address, u64),
+    Paused,
 }
 
 #[contracttype]
@@ -126,6 +127,7 @@ impl PerpOrderGatewayContract {
     }
 
     pub fn settle_fill(env: Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> {
+        require_not_paused(&env)?;
         require_operator(&env)?;
         require_order_auth(&env, Symbol::new(&env, "maker"), &fill.maker);
         require_order_auth(&env, Symbol::new(&env, "taker"), &fill.taker);
@@ -187,6 +189,27 @@ impl PerpOrderGatewayContract {
     pub fn is_cancelled(env: Env, owner: Address, nonce: u64) -> bool {
         is_cancelled(&env, &owner, nonce)
     }
+
+    // --- H4: Emergency pause ---
+
+    pub fn emergency_pause(env: Env) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    pub fn unpause(env: Env) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().remove(&DataKey::Paused);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
+    }
 }
 
 fn require_admin(env: &Env) -> Result<Address, CoreError> {
@@ -207,6 +230,18 @@ fn require_operator(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::Unauthorized)?;
     operator.require_auth();
     Ok(operator)
+}
+
+fn require_not_paused(env: &Env) -> Result<(), CoreError> {
+    if env
+        .storage()
+        .instance()
+        .get::<DataKey, bool>(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(CoreError::Unauthorized);
+    }
+    Ok(())
 }
 
 fn require_order_auth(env: &Env, role: Symbol, order: &Order) {
@@ -640,5 +675,21 @@ mod tests {
             s.vault.balance_of(&s.admin, &s.settlement_asset),
             (PRECISION / 100) + (PRECISION / 20)
         );
+    }
+
+    // --- H4 gateway pause test ---
+
+    #[test]
+    fn paused_gateway_rejects_settle_fill() {
+        let s = setup();
+        s.gateway.emergency_pause();
+        assert!(s.gateway.is_paused());
+        let fill = MatchedFill {
+            maker: order(s.maker.clone(), false, 1, &s.env),
+            taker: order(s.taker.clone(), true, 7, &s.env),
+            fill_size: PRECISION,
+            fill_price: 100 * PRECISION,
+        };
+        assert!(s.gateway.try_settle_fill(&fill).is_err());
     }
 }
