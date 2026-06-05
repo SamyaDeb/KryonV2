@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useWalletStore } from "@/stores/wallet";
-import { deposit, withdraw, getBalance } from "@/lib/stellar/contracts";
+import { deposit, withdraw, getBalance, getTokenBalance } from "@/lib/stellar/contracts";
 import { humanToAmount, amountToHuman } from "@/lib/format";
 import { ASSETS, STELLAR_EXPERT_URL } from "@/config";
+import { isOnExpectedNetwork } from "@/lib/stellar/freighter";
 import { UsdcLogo } from "@/components/common/AssetLogos";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -20,7 +21,7 @@ export function DepositWithdrawDialog({
   triggerClassName?: string;
   defaultTab?: "deposit" | "withdraw";
 } = {}) {
-  const { address } = useWalletStore();
+  const { address, setWrongNetwork } = useWalletStore();
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<"deposit" | "withdraw">(defaultTab);
@@ -47,6 +48,13 @@ export function DepositWithdrawDialog({
   });
   const balanceHuman = balance !== undefined ? amountToHuman(balance) : 0;
 
+  const { data: walletBalance } = useQuery({
+    queryKey: ["walletBalance", address],
+    queryFn: () => getTokenBalance(address!, ASSETS.usdc),
+    enabled: !!address && open,
+  });
+  const walletBalanceHuman = walletBalance !== undefined ? amountToHuman(walletBalance) : null;
+
   function onAmount(v: string) {
     const cleaned = v.replace(/[^0-9.]/g, "");
     const parts = cleaned.split(".");
@@ -60,6 +68,14 @@ export function DepositWithdrawDialog({
       toast.error("Enter a valid amount");
       return;
     }
+    // Re-check network on every action — Freighter may have switched networks since connect
+    const onCorrectNetwork = await isOnExpectedNetwork();
+    if (!onCorrectNetwork) {
+      setWrongNetwork(true);
+      toast.error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+      return;
+    }
+    setWrongNetwork(false);
     const raw = humanToAmount(parsedAmount);
     setLoading(true);
     try {
@@ -85,7 +101,9 @@ export function DepositWithdrawDialog({
   }
 
   const amt = parseFloat(amount) || 0;
-  const overMax = tab === "withdraw" && amt > balanceHuman;
+  const overMax =
+    (tab === "withdraw" && amt > balanceHuman) ||
+    (tab === "deposit" && walletBalanceHuman !== null && amt > walletBalanceHuman);
   const pill = (active: boolean) =>
     `rounded-[8px] py-2 text-[13px] font-semibold transition-colors ${
       active ? "bg-[#212128] text-[#f5f5f5]" : "text-[#a3a3a3] hover:text-[#f5f5f5]"
@@ -128,6 +146,22 @@ export function DepositWithdrawDialog({
                 <div className="mt-4 rounded-[12px] border border-[#334155] bg-[#212128] p-4">
                   <div className="mb-2 flex items-center justify-between text-[12px] text-[#a3a3a3]">
                     <span>Amount</span>
+                    {tab === "deposit" && walletBalanceHuman !== null && (
+                      <div className="flex items-center gap-2 text-[11.5px]">
+                        <button
+                          onClick={() => setAmount((walletBalanceHuman / 2).toFixed(2))}
+                          className="rounded-full bg-[#212128] border border-[#334155] px-2.5 py-0.5 font-semibold text-[#a3a3a3] hover:text-[#f5f5f5] transition-colors"
+                        >
+                          50%
+                        </button>
+                        <button
+                          onClick={() => setAmount(walletBalanceHuman.toFixed(2))}
+                          className="rounded-full bg-[#212128] border border-[#334155] px-2.5 py-0.5 font-semibold text-[#a3a3a3] hover:text-[#f5f5f5] transition-colors"
+                        >
+                          Max
+                        </button>
+                      </div>
+                    )}
                     {tab === "withdraw" && (
                       <div className="flex items-center gap-2 text-[11.5px]">
                         <button
@@ -160,14 +194,25 @@ export function DepositWithdrawDialog({
                 </div>
 
                 {/* Balance row */}
-                <div className="mt-3 flex items-center justify-between px-1 text-[12.5px]">
-                  <span className="text-[#a3a3a3]">
-                    {tab === "deposit" ? "Vault balance" : "Available to withdraw"}
-                  </span>
-                  <span className="flex items-center gap-1.5 tabular text-[#f5f5f5]">
-                    <UsdcLogo size={12} />
-                    {balance === undefined ? "—" : `$${balanceHuman.toFixed(2)}`}
-                  </span>
+                <div className="mt-3 flex flex-col gap-1 px-1 text-[12.5px]">
+                  {tab === "deposit" && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-[#a3a3a3]">Wallet balance</span>
+                      <span className="flex items-center gap-1.5 tabular text-[#f5f5f5]">
+                        <UsdcLogo size={12} />
+                        {walletBalanceHuman === null ? "—" : `$${walletBalanceHuman.toFixed(2)}`}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between">
+                    <span className="text-[#a3a3a3]">
+                      {tab === "deposit" ? "Vault balance" : "Available to withdraw"}
+                    </span>
+                    <span className="flex items-center gap-1.5 tabular text-[#f5f5f5]">
+                      <UsdcLogo size={12} />
+                      {balance === undefined ? "—" : `$${balanceHuman.toFixed(2)}`}
+                    </span>
+                  </div>
                 </div>
 
                 {/* Primary */}
@@ -176,7 +221,15 @@ export function DepositWithdrawDialog({
                   disabled={loading || !amount || amt <= 0 || overMax}
                   className="mt-5 w-full h-12 rounded-[10px] text-[14px] font-bold text-[#19191A] bg-[#e2a9f1] hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition"
                 >
-                  {loading ? "Confirming…" : overMax ? "Insufficient balance" : tab === "deposit" ? "Deposit USDC" : "Withdraw USDC"}
+                  {loading
+                    ? "Confirming…"
+                    : tab === "deposit" && walletBalanceHuman !== null && amt > walletBalanceHuman
+                    ? "Insufficient USDC in wallet"
+                    : tab === "withdraw" && amt > balanceHuman
+                    ? "Insufficient vault balance"
+                    : tab === "deposit"
+                    ? "Deposit USDC"
+                    : "Withdraw USDC"}
                 </button>
 
                 <p className="mt-3 text-[11px] text-[#737373] text-center">

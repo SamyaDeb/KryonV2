@@ -135,7 +135,7 @@ export async function simulateSettleFill(fill: {
     // Get current ledger to set a valid signatureExpirationLedger on auth entries.
     // assembleTransaction does NOT populate this field — Freighter rejects entries with 0.
     const latestLedger = await server.getLatestLedger();
-    const expirationLedger = latestLedger.sequence + 100; // ~8 minutes at 5s/ledger
+    const expirationLedger = latestLedger.sequence + 500; // ~40 minutes at 5s/ledger
 
     const assembled = sorobanRpc.assembleTransaction(tx, sim).build();
 

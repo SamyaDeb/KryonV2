@@ -22,7 +22,11 @@ import { neon, neonConfig, type NeonQueryFunction } from "@neondatabase/serverle
 // Keep fetch connections alive — prevents "fetch failed" on Neon serverless
 // after idle periods by re-establishing the HTTP connection as needed.
 neonConfig.fetchConnectionCache = true;
-import { ACTIVE_MARKETS, NETWORK } from "../config";
+import {
+  Account, Keypair, Contract, TransactionBuilder,
+  nativeToScVal, scValToNative, xdr, rpc,
+} from "@stellar/stellar-sdk";
+import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
 import { simulateSettleFill } from "../lib/stellar/settlement";
 
 type Sql = NeonQueryFunction<false, false>;
@@ -31,7 +35,54 @@ const POLL_INTERVAL_MS = 1_000;
 const NETWORK_NAME = NETWORK.name;
 const PRICE_PRECISION = 1e18;
 const AMOUNT_PRECISION = 1e7;
-const MATCHER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({ id: m.marketId, symbol: m.symbol }));
+// Mirror the engine's max_execution_deviation_bps so we never produce a fill the
+// on-chain settle_fill would reject with PriceOutsideBand (#16). Configured to
+// match the deployed engine (500 = 5%); override via env if the engine changes.
+const EXECUTION_DEVIATION_BPS = BigInt(process.env.MATCHER_EXECUTION_DEVIATION_BPS ?? "500");
+const MATCHER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
+  id: m.marketId,
+  symbol: m.symbol,
+  oracleSymbol: m.oracleSymbol,
+}));
+
+// ── Oracle price (for execution-band pre-filter) ──────────────────────────────
+// Read-only simulation against the oracle adapter; mirrors the on-chain band
+// check so out-of-band (stale/mispriced) orders never get matched + settled.
+
+const _oracleServer = new rpc.Server(NETWORK.rpcUrl);
+const _oracleKp = Keypair.random();
+
+async function getOraclePrice(oracleSymbol: string): Promise<bigint | null> {
+  try {
+    const acct = new Account(_oracleKp.publicKey(), "100");
+    const tx = new TransactionBuilder(acct, { fee: "500000", networkPassphrase: NETWORK.passphrase })
+      .addOperation(
+        new Contract(CONTRACTS.oracleAdapter).call(
+          "get_price",
+          nativeToScVal(oracleSymbol, { type: "symbol" }),
+          xdr.ScVal.scvVoid()
+        )
+      )
+      .setTimeout(60)
+      .build();
+    const sim = await _oracleServer.simulateTransaction(tx);
+    if (rpc.Api.isSimulationError(sim)) return null;
+    const retval = (sim as rpc.Api.SimulateTransactionSuccessResponse).result?.retval;
+    if (!retval) return null;
+    const snapshot = scValToNative(retval) as { price?: string | bigint };
+    return snapshot?.price != null ? BigInt(snapshot.price) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Is a fill price within oracle ± EXECUTION_DEVIATION_BPS? (oracle null → allow,
+// let on-chain simulation be the gate.)
+function withinBand(fillPrice: bigint, oracle: bigint | null): boolean {
+  if (oracle == null || oracle <= 0n) return true;
+  const maxDelta = (oracle * EXECUTION_DEVIATION_BPS) / 10_000n;
+  return fillPrice >= oracle - maxDelta && fillPrice <= oracle + maxDelta;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -394,8 +445,18 @@ async function tick(sql: Sql) {
     ]);
     if (limitOrders.length === 0 && marketOrders.length === 0) continue;
 
+    // Fetch oracle once per market to pre-filter out-of-band fills. Stale or
+    // mispriced orders (e.g. resting far from current oracle) would otherwise
+    // match, fail settle_fill with PriceOutsideBand, and roll back every tick.
+    const oracle = await getOraclePrice(market.oracleSymbol);
+
     const matches = matchAll(limitOrders, marketOrders);
     for (const match of matches) {
+      if (!withinBand(match.fillPrice, oracle)) {
+        // Skip silently — these are stale/mispriced orders the engine would
+        // reject. They stay in the book but never produce failing settlements.
+        continue;
+      }
       const ok = await persistFill(sql, match);
       if (ok) {
         totalFills++;

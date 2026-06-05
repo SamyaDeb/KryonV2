@@ -8,7 +8,7 @@ import { buildOrderIntent } from "@/lib/market/order-intent";
 import { submitOrder } from "@/lib/market/matcher";
 import { useLocalOrders } from "@/stores/orders";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getBalance } from "@/lib/stellar/contracts";
 import { amountToHuman, priceToHuman } from "@/lib/format";
 import { freighterConnect, freighterIsInstalled, isOnExpectedNetwork } from "@/lib/stellar/freighter";
@@ -93,6 +93,7 @@ function MarginPop({
 export function OrderEntry({ market }: { market: MarketConfig }) {
   const { address, connected, connecting, wrongNetwork, setAddress, setConnected, setConnecting, setWrongNetwork } =
     useWalletStore();
+  const queryClient = useQueryClient();
   const addOrder = useLocalOrders((s) => s.addOrder);
   const rawMarkPrice = useMarketStore((s) => s.markPrices[market.marketId]);
   const book = useMarketStore((s) => s.orderBooks[market.marketId]);
@@ -126,6 +127,7 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
   const [tpsl, setTpsl] = useState(false);
   const [marOpen, setMarOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [fastPoll, setFastPoll] = useState(false);
 
   const maxLev = degenMode ? 500 : Math.round(market.maxLeverageBps / 10000);
   const effectiveLeverage = Math.min(leverage, maxLev);
@@ -155,7 +157,7 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
     queryKey: ["balance", address],
     queryFn: () => getBalance(address!, ASSETS.usdc),
     enabled: !!address && connected,
-    refetchInterval: 10_000,
+    refetchInterval: fastPoll ? 2_000 : 10_000,
   });
 
   // ── Live mid price: oracle mark → orderbook mid → fallback 0 ───────────────
@@ -223,7 +225,14 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
 
   async function handleSubmit() {
     if (!address || !connected) { toast.error("Connect your wallet first"); return; }
-    if (wrongNetwork) { toast.error("Switch Freighter to the configured Stellar network"); return; }
+    // Re-check live in case user switched networks in Freighter after connecting
+    const onCorrectNetwork = await isOnExpectedNetwork();
+    if (!onCorrectNetwork) {
+      setWrongNetwork(true);
+      toast.error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+      return;
+    }
+    setWrongNetwork(false);
     if (!size || sizeNum <= 0) { toast.error("Enter a valid size"); return; }
     if (execPrice <= 0) {
       toast.error(orderType === "market" ? "Waiting for a market price" : "Enter a limit price"); return;
@@ -253,8 +262,16 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
     setLoading(true);
     try {
       const rawSize = BigInt(Math.round(baseSizeNum * Number(AMOUNT_PRECISION)));
+      // Market orders use an aggressive limit price so the on-chain validate_order
+      // (which requires limit_price > 0) accepts the settlement.
+      // Buys use 2× mark price; sells use 0.5× — both cross any resting order immediately.
       const rawPrice = orderType === "market"
-        ? 0n
+        ? (() => {
+            const mark = rawMarkPrice && rawMarkPrice > 0n
+              ? rawMarkPrice
+              : BigInt(Math.round(execPrice * Number(PRICE_PRECISION)));
+            return side === "buy" ? mark * 2n : mark / 2n || 1n;
+          })()
         : BigInt(Math.round(limitPriceNum * Number(PRICE_PRECISION)));
 
       const intent = buildOrderIntent({
@@ -275,6 +292,13 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
           (reduce ? " reduce-only" : "")
         );
         if (showTpSl && tpsl) toast.message("TP/SL values are staged in the ticket; trigger order submission is not yet supported by the matcher.");
+        // Immediately refetch all user-facing data and poll fast for 30s to catch on-chain settlement
+        queryClient.invalidateQueries({ queryKey: ["balance", address] });
+        queryClient.invalidateQueries({ queryKey: ["health", address] });
+        queryClient.invalidateQueries({ queryKey: ["fills", address] });
+        queryClient.invalidateQueries({ queryKey: ["positions", address] });
+        setFastPoll(true);
+        setTimeout(() => setFastPoll(false), 30_000);
       } else {
         toast.error(result.error ?? "Order rejected");
       }
