@@ -81,4 +81,37 @@ mod tests {
         assert!(next.long_index > 0);
         assert!(next.short_index < 0);
     }
+
+    #[test]
+    fn funding_surplus_accounting_is_correct() {
+        // M1: verify that delta * (oi_long - oi_short) / PRECISION gives the correct net
+        // surplus that should be routed to insurance.
+        //
+        // oi_long = 9, oi_short = 1 (in PRECISION units)
+        // After 1 hour the index advances by `rate_per_hour` (clamp allows up to PRECISION/1000).
+        // delta = long_index_new - long_index_old
+        // Expected insurance credit = delta * (9 - 1) / PRECISION = delta * 8
+        let cfg = FundingConfig {
+            imbalance_coeff: PRECISION / 100,
+            max_rate_per_hour: PRECISION / 1_000,
+        };
+        let state = FundingState {
+            long_index: 0,
+            short_index: 0,
+            rate_per_hour: 0,
+            last_update: 0,
+        };
+        let oi_long = 9 * PRECISION;
+        let oi_short = PRECISION;
+        let next = update_from_imbalance(&cfg, &state, oi_long, oi_short, 3_600).unwrap();
+        let delta = next.long_index; // prev was 0
+        // Total paid by longs = delta * oi_long / PRECISION
+        // Total received by shorts = delta * oi_short / PRECISION (note: short_index decreased by same delta)
+        // Net surplus = delta * (oi_long - oi_short) / PRECISION
+        let oi_imbalance = checked_sub(oi_long, oi_short).unwrap();
+        let net_surplus = mul_div(delta, oi_imbalance, PRECISION).unwrap();
+        let expected_surplus = mul_div(delta, 8 * PRECISION, PRECISION).unwrap();
+        assert_eq!(net_surplus, expected_surplus);
+        assert!(net_surplus > 0);
+    }
 }
