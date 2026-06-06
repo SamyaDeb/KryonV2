@@ -84,10 +84,8 @@ pub fn account_health(
     // Second pass: compute isolated equity contribution and cross unrealized pnl separately
     let mut isolated_equity = 0i128;
     let mut cross_unrealized = 0i128;
-    let mut idx = 0usize;
-    for p in account.positions.iter() {
+    for (idx, p) in account.positions.iter().enumerate() {
         let upnl = pnl_buf[idx];
-        idx += 1;
         if p.mode == MarginMode::Isolated {
             // Isolated position's contribution to equity is capped at 0 on the downside
             // (losses beyond the locked margin cannot consume cross collateral)
@@ -290,7 +288,7 @@ mod tests {
             positions,
         };
         let mut markets = Map::new(&env);
-        markets.set(1, make_market(&env, 1, 1 * PRECISION));
+        markets.set(1, make_market(&env, 1, PRECISION));
         let health = account_health(&env, &account, &markets).unwrap();
         // unrealized pnl = (1 - 100) * 10 = -990
         assert_eq!(health.unrealized_pnl, -990 * PRECISION);
@@ -337,7 +335,7 @@ mod tests {
                     position_id: 2,
                     owner: user.clone(),
                     market_id: 2,
-                    size: 1 * PRECISION,
+                    size: PRECISION,
                     entry_price: 100 * PRECISION,
                     margin: 0,
                     is_long: true,
@@ -353,7 +351,7 @@ mod tests {
         };
         let mut markets = Map::new(&env);
         // Isolated market: price crashed
-        markets.set(1, make_market(&env, 1, 1 * PRECISION));
+        markets.set(1, make_market(&env, 1, PRECISION));
         // Cross market: price at par
         markets.set(2, make_market(&env, 2, 100 * PRECISION));
         let health = account_health(&env, &account, &markets).unwrap();
