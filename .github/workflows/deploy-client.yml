@@ -1,5 +1,8 @@
 name: deploy-client
 
+# Manual, environment-aware deploy of the trading client to Vercel.
+# Preview deploys are self-serve; production deploys require typing `mainnet`
+# AND pass through the protected `production` GitHub Environment.
 on:
   workflow_dispatch:
     inputs:
@@ -15,14 +18,23 @@ on:
         required: false
         type: string
 
+# Serialize per-target; never cancel an in-flight deploy (half-promoted state risk).
 concurrency:
   group: deploy-client-${{ inputs.environment }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: build with the exact public env the target will run with, so a bad
+  # config (missing mainnet contract address, etc.) is caught before deploy.
+  # ---------------------------------------------------------------------------
   gate:
     name: deployment gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: client
@@ -50,32 +62,45 @@ jobs:
       UPSTASH_REDIS_REST_URL: ${{ inputs.environment == 'production' && secrets.UPSTASH_REDIS_REST_URL || '' }}
       UPSTASH_REDIS_REST_TOKEN: ${{ inputs.environment == 'production' && secrets.UPSTASH_REDIS_REST_TOKEN || '' }}
     steps:
+      # Hard stop: a production target without the explicit `mainnet` confirmation
+      # never even installs deps — defense against an accidental dropdown click.
       - name: Refuse unconfirmed production deploy
         if: ${{ inputs.environment == 'production' && inputs.confirm_mainnet != 'mainnet' }}
         run: |
-          echo "Production deploy requires confirm_mainnet=mainnet"
+          echo "::error::Production deploy requires confirm_mainnet=mainnet"
           exit 1
 
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
+          persist-credentials: false
 
-      - run: npm ci
-      - run: npm audit --audit-level=moderate
-      - run: npm run lint
-      - run: npm run production:gate
-      - run: npx tsc --noEmit
-      - run: npm run build
+      - name: Setup
+        uses: ./.github/actions/setup-client
 
+      - name: Lint
+        run: npm run lint
+
+      - name: Production readiness gate
+        run: npm run production:gate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Deploy: retry-wrapped Vercel prebuilt flow, scoped to the chosen environment.
+  # ---------------------------------------------------------------------------
   deploy:
     name: vercel deploy
     needs: gate
     runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
+    timeout-minutes: 20
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ inputs.environment == 'production' && vars.NEXT_PUBLIC_APP_URL || '' }}
     defaults:
       run:
         working-directory: client
@@ -83,37 +108,51 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_CLI_VERSION: ${{ vars.VERCEL_CLI_VERSION || 'latest' }}
+      TARGET_FLAG: ${{ inputs.environment == 'production' && '--prod' || '' }}
+      VERCEL_ENV: ${{ inputs.environment == 'production' && 'production' || 'preview' }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-
-      - run: npm ci
+          persist-credentials: false
 
       - name: Validate deploy secrets
         run: |
-          test -n "$VERCEL_ORG_ID"
-          test -n "$VERCEL_PROJECT_ID"
-          test -n "$VERCEL_TOKEN"
+          test -n "$VERCEL_ORG_ID"     || { echo "::error::VERCEL_ORG_ID missing";     exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID missing"; exit 1; }
+          test -n "$VERCEL_TOKEN"      || { echo "::error::VERCEL_TOKEN missing";       exit 1; }
 
       - name: Pull Vercel environment
-        run: npx --yes vercel@latest pull --yes --environment=${{ inputs.environment == 'production' && 'production' || 'preview' }} --token="$VERCEL_TOKEN"
+        run: |
+          n=0; until [ $n -ge 3 ]; do
+            npx --yes vercel@"$VERCEL_CLI_VERSION" pull --yes --environment="$VERCEL_ENV" --token="$VERCEL_TOKEN" && break
+            n=$((n+1)); echo "pull attempt $n failed; retrying in $((n*10))s"; sleep $((n*10))
+          done; [ $n -lt 3 ]
 
       - name: Build Vercel output
-        run: npx --yes vercel@latest build ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN"
+        run: npx --yes vercel@"$VERCEL_CLI_VERSION" build $TARGET_FLAG --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output
-        run: npx --yes vercel@latest deploy --prebuilt ${{ inputs.environment == 'production' && '--prod' || '' }} --token="$VERCEL_TOKEN"
+        run: |
+          n=0; until [ $n -ge 3 ]; do
+            url=$(npx --yes vercel@"$VERCEL_CLI_VERSION" deploy --prebuilt $TARGET_FLAG --token="$VERCEL_TOKEN") && {
+              echo "Deployed: $url"
+              { echo "### ✅ ${VERCEL_ENV} deploy"; echo "$url"; } >> "$GITHUB_STEP_SUMMARY"
+              break
+            }
+            n=$((n+1)); echo "deploy attempt $n failed; retrying in $((n*15))s"; sleep $((n*15))
+          done; [ $n -lt 3 ]
 
+  # ---------------------------------------------------------------------------
+  # Post-deploy live validation — production only.
+  # ---------------------------------------------------------------------------
   validate-production:
     name: validate production
     if: ${{ inputs.environment == 'production' }}
     needs: deploy
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: client
@@ -130,13 +169,13 @@ jobs:
       INCIDENT_RUNBOOK_URL: ${{ vars.INCIDENT_RUNBOOK_URL }}
       ROLLBACK_RUNBOOK_URL: ${{ vars.ROLLBACK_RUNBOOK_URL }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
+          persist-credentials: false
 
-      - run: npm ci
-      - run: npm run production:live-gate
+      - name: Setup
+        uses: ./.github/actions/setup-client
+
+      - name: Live production gate
+        run: npm run production:live-gate

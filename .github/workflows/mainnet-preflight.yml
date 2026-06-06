@@ -1,5 +1,7 @@
 name: mainnet-preflight
 
+# Manual dry-run that builds the client with the FULL mainnet env + secrets to
+# prove the production config is complete before anyone runs the real deploy.
 on:
   workflow_dispatch:
     inputs:
@@ -8,11 +10,21 @@ on:
         required: true
         type: string
 
+permissions:
+  contents: read
+
+concurrency:
+  group: mainnet-preflight
+  cancel-in-progress: false
+
 jobs:
   preflight:
     name: mainnet preflight
     if: ${{ inputs.confirm_network == 'mainnet' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Run under the protected environment so mainnet secrets/vars are scoped here.
+    environment: production
     defaults:
       run:
         working-directory: client
@@ -40,15 +52,22 @@ jobs:
       UPSTASH_REDIS_REST_URL: ${{ secrets.UPSTASH_REDIS_REST_URL }}
       UPSTASH_REDIS_REST_TOKEN: ${{ secrets.UPSTASH_REDIS_REST_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-      - run: npm ci
-      - run: npm audit --audit-level=moderate
-      - run: npm run lint
-      - run: npm run production:gate
-      - run: npx tsc --noEmit
-      - run: npm run build
+          persist-credentials: false
+
+      - name: Setup
+        uses: ./.github/actions/setup-client
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production readiness gate
+        run: npm run production:gate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build (mainnet config)
+        run: npm run build

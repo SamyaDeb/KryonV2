@@ -1,5 +1,7 @@
 name: production-validation
 
+# Manual live validation against the deployed production DEX: market-data soak,
+# websocket reconnect storm, and an optional abuse-style rate-limit probe.
 on:
   workflow_dispatch:
     inputs:
@@ -23,6 +25,9 @@ on:
         default: false
         type: boolean
 
+permissions:
+  contents: read
+
 concurrency:
   group: production-validation
   cancel-in-progress: false
@@ -32,6 +37,9 @@ jobs:
     name: live production validation
     if: ${{ inputs.confirm_mainnet == 'mainnet' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Scope live-validation vars/secrets to the protected production environment.
+    environment: production
     defaults:
       run:
         working-directory: client
@@ -48,13 +56,13 @@ jobs:
       INCIDENT_RUNBOOK_URL: ${{ vars.INCIDENT_RUNBOOK_URL }}
       ROLLBACK_RUNBOOK_URL: ${{ vars.ROLLBACK_RUNBOOK_URL }}
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
+          persist-credentials: false
 
-      - run: npm ci
-      - run: npm run production:live-gate
+      - name: Setup
+        uses: ./.github/actions/setup-client
+
+      - name: Live production gate
+        run: npm run production:live-gate
