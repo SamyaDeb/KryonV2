@@ -32,6 +32,7 @@ type Sql = NeonQueryFunction<false, false>;
 const NETWORK_NAME = NETWORK.name;
 const PRICE_PRECISION = 1e18;
 const AMOUNT_PRECISION = 1e7;
+const POLL_INTERVAL_MS = Number(process.env.MATCHER_INTERVAL_MS ?? "1000");
 const MATCHER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({ id: m.marketId, symbol: m.symbol }));
 
 // ── Types ────────────────────────────────────────────────────────────────────
