@@ -42,7 +42,8 @@ const FEE       = "2000000"; // 0.2 XLM — higher for complex ops
 const WASM: Record<string, string> = {
   vault:         "7f6adceb81645e03ffa4c1db5c6fff7d4470688ed2abff54535d4458dbdea52d",
   engine:        "4031914ead31d2e4c1b78a2b646601ad470c0445344c1813b7b939c64bfe883a",
-  orderGateway:  "93f4eb352567df7af08181c7636cfd78b6b47a068858f8b8e0a2e116ef90cb98",
+  orderGateway:  "b93c34aff95308818d67858c8f9dd12b3d4a4117d3a5dd7a82ae042fa85f13be", // C2: settle_fill_signed
+
   risk:          "c0dc9f73b67588b55aa3aca4735775dc2fbfb29d7a3681f2634b8221522ef251",
 };
 
@@ -262,6 +263,20 @@ async function main() {
   // engine.set_order_gateway(gateway)
   account = await callContract(server, kp, account, engineId, "set_order_gateway",
     [addr(gatewayId)], "engine.set_order_gateway");
+
+  // C2: gateway.set_operator(matcher) — the operator account that submits
+  // settle_fill_signed (must match MATCHER_OPERATOR_SECRET's fee-payer key).
+  const OPERATOR_PUBKEY = process.env.MATCHER_OPERATOR_PUBKEY
+    ?? (process.env.MATCHER_OPERATOR_SECRET ? Keypair.fromSecret(process.env.MATCHER_OPERATOR_SECRET).publicKey() : admin);
+  account = await callContract(server, kp, account, gatewayId, "set_operator",
+    [addr(OPERATOR_PUBKEY)], "gateway.set_operator");
+
+  // C2: gateway.set_domain(passphrase bytes) — bound into the canonical order
+  // message so settle_fill_signed verifies the wallet signatures (and blocks
+  // cross-network replay). MUST equal the passphrase the client signs with.
+  const domainBytes = Buffer.from(NETWORK, "utf8");
+  account = await callContract(server, kp, account, gatewayId, "set_domain",
+    [xdr.ScVal.scvBytes(domainBytes)], "gateway.set_domain");
 
   // vault.set_collateral(usdc, "USDC", haircut_bps=0, active=true)
   account = await callContract(server, kp, account, vaultId, "set_collateral",

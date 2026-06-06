@@ -3,7 +3,8 @@
 
 use protocol_core::{checked_add, CoreError, MarginMode, Position};
 use soroban_sdk::{
-    contract, contractimpl, contracttype, vec, Address, Env, IntoVal, Symbol, Val, Vec,
+    address_payload::AddressPayload, contract, contractimpl, contracttype, vec, Address, Bytes,
+    BytesN, Env, IntoVal, Symbol, Val, Vec,
 };
 
 #[contracttype]
@@ -13,6 +14,9 @@ pub enum DataKey {
     PendingAdmin,
     Engine,
     Operator,
+    /// Settlement signing domain (the network passphrase bytes). Bound into the
+    /// canonical order message so signatures cannot be replayed across networks.
+    Domain,
     Filled(Address, u64),
     Cancelled(Address, u64),
     Paused,
@@ -126,60 +130,52 @@ impl PerpOrderGatewayContract {
         Ok(())
     }
 
+    /// Admin sets the settlement signing domain — the network passphrase bytes.
+    /// This is bound into the canonical order message that `settle_fill_signed`
+    /// reconstructs and verifies, preventing cross-network signature replay.
+    pub fn set_domain(env: Env, domain: Bytes) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Domain, &domain);
+        Ok(())
+    }
+
+    pub fn domain(env: Env) -> Option<Bytes> {
+        env.storage().instance().get(&DataKey::Domain)
+    }
+
+    /// Interactive settlement: maker and taker each provide a Soroban auth entry
+    /// (collected via the client at fill time). Kept for completeness/back-compat.
     pub fn settle_fill(env: Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> {
         require_not_paused(&env)?;
         require_operator(&env)?;
         require_order_auth(&env, Symbol::new(&env, "maker"), &fill.maker);
         require_order_auth(&env, Symbol::new(&env, "taker"), &fill.taker);
         validate_fill(&env, &fill)?;
+        execute_fill(&env, fill)
+    }
 
-        settle_user_side(
-            &env,
-            &fill.maker.owner,
-            fill.maker.market_id,
-            fill.maker.is_long,
-            fill.maker.reduce_only,
-            fill.fill_size,
-            fill.fill_price,
-        )?;
-        engine_charge_trade_fee(
-            &env,
-            &fill.maker.owner,
-            fill.maker.market_id,
-            fill.fill_size,
-            fill.fill_price,
-            true,
-        )?;
-        settle_user_side(
-            &env,
-            &fill.taker.owner,
-            fill.taker.market_id,
-            fill.taker.is_long,
-            fill.taker.reduce_only,
-            fill.fill_size,
-            fill.fill_price,
-        )?;
-        engine_charge_trade_fee(
-            &env,
-            &fill.taker.owner,
-            fill.taker.market_id,
-            fill.fill_size,
-            fill.fill_price,
-            false,
-        )?;
-
-        let maker_filled = add_filled(&env, &fill.maker.owner, fill.maker.nonce, fill.fill_size)?;
-        let taker_filled = add_filled(&env, &fill.taker.owner, fill.taker.nonce, fill.fill_size)?;
-
-        Ok(FillReceipt {
-            maker_owner: fill.maker.owner,
-            taker_owner: fill.taker.owner,
-            market_id: fill.maker.market_id,
-            fill_size: fill.fill_size,
-            fill_price: fill.fill_price,
-            maker_filled,
-            taker_filled,
-        })
+    /// Autonomous settlement (the primary path): maker and taker signed their
+    /// order once at placement (SEP-53 over the canonical order message). The
+    /// operator (matcher) submits the matched fill with both ed25519 signatures;
+    /// the contract verifies them on-chain — no per-fill wallet interaction.
+    ///
+    /// Security: each signature commits to the order's market, side, size,
+    /// limit price, nonce and expiry. `validate_fill` then enforces the operator
+    /// cannot fill beyond the signed size, outside the signed price, after expiry,
+    /// or after cancellation — so signing once safely authorizes all fills of
+    /// that order.
+    pub fn settle_fill_signed(
+        env: Env,
+        fill: MatchedFill,
+        maker_sig: BytesN<64>,
+        taker_sig: BytesN<64>,
+    ) -> Result<FillReceipt, CoreError> {
+        require_not_paused(&env)?;
+        require_operator(&env)?;
+        verify_order_signature(&env, &fill.maker, &maker_sig)?;
+        verify_order_signature(&env, &fill.taker, &taker_sig)?;
+        validate_fill(&env, &fill)?;
+        execute_fill(&env, fill)
     }
 
     pub fn filled(env: Env, owner: Address, nonce: u64) -> i128 {
@@ -265,6 +261,151 @@ fn engine_address(env: &Env) -> Result<Address, CoreError> {
         .instance()
         .get(&DataKey::Engine)
         .ok_or(CoreError::InvalidConfig)
+}
+
+/// Shared settlement body for both `settle_fill` and `settle_fill_signed`.
+/// Authorization + validation are performed by the callers before this runs.
+fn execute_fill(env: &Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> {
+    settle_user_side(
+        env,
+        &fill.maker.owner,
+        fill.maker.market_id,
+        fill.maker.is_long,
+        fill.maker.reduce_only,
+        fill.fill_size,
+        fill.fill_price,
+    )?;
+    engine_charge_trade_fee(
+        env,
+        &fill.maker.owner,
+        fill.maker.market_id,
+        fill.fill_size,
+        fill.fill_price,
+        true,
+    )?;
+    settle_user_side(
+        env,
+        &fill.taker.owner,
+        fill.taker.market_id,
+        fill.taker.is_long,
+        fill.taker.reduce_only,
+        fill.fill_size,
+        fill.fill_price,
+    )?;
+    engine_charge_trade_fee(
+        env,
+        &fill.taker.owner,
+        fill.taker.market_id,
+        fill.fill_size,
+        fill.fill_price,
+        false,
+    )?;
+
+    let maker_filled = add_filled(env, &fill.maker.owner, fill.maker.nonce, fill.fill_size)?;
+    let taker_filled = add_filled(env, &fill.taker.owner, fill.taker.nonce, fill.fill_size)?;
+
+    Ok(FillReceipt {
+        maker_owner: fill.maker.owner,
+        taker_owner: fill.taker.owner,
+        market_id: fill.maker.market_id,
+        fill_size: fill.fill_size,
+        fill_price: fill.fill_price,
+        maker_filled,
+        taker_filled,
+    })
+}
+
+/// Verify a maker/taker ed25519 signature over the canonical order message.
+///
+/// Reconstructs the exact bytes the wallet signed and checks the signature
+/// against the owner account's ed25519 public key. Must byte-match the
+/// off-chain `orderSettlementMessage` in client/lib/market/signing-message.ts:
+///
+///   <domain>|place_order|<pubkey_hex>|<market_id>|<is_long 0/1>|<size>|
+///   <limit_price>|<reduce_only 0/1>|<nonce>|<expiry_ts>
+///
+/// then wrapped per SEP-53: sha256("Stellar Signed Message:\n" || message),
+/// which is the 32-byte value the wallet's ed25519 key signs.
+fn verify_order_signature(env: &Env, order: &Order, sig: &BytesN<64>) -> Result<(), CoreError> {
+    let domain: Bytes = env
+        .storage()
+        .instance()
+        .get(&DataKey::Domain)
+        .ok_or(CoreError::InvalidConfig)?;
+
+    // The owner must be an ed25519 account address (G...); extract its 32-byte key.
+    let pubkey: BytesN<32> = match order.owner.to_payload() {
+        Some(AddressPayload::AccountIdPublicKeyEd25519(pk)) => pk,
+        _ => return Err(CoreError::Unauthorized),
+    };
+
+    // Build the canonical message bytes.
+    let mut msg = Bytes::new(env);
+    msg.append(&domain);
+    msg.extend_from_slice(b"|place_order|");
+    append_hex(&mut msg, &pubkey.to_array());
+    msg.push_back(b'|');
+    append_decimal_u128(&mut msg, order.market_id as u128);
+    msg.push_back(b'|');
+    msg.push_back(if order.is_long { b'1' } else { b'0' });
+    msg.push_back(b'|');
+    append_decimal_i128(&mut msg, order.size);
+    msg.push_back(b'|');
+    append_decimal_i128(&mut msg, order.limit_price);
+    msg.push_back(b'|');
+    msg.push_back(if order.reduce_only { b'1' } else { b'0' });
+    msg.push_back(b'|');
+    append_decimal_u128(&mut msg, order.nonce as u128);
+    msg.push_back(b'|');
+    append_decimal_u128(&mut msg, order.expiry_ts as u128);
+
+    // SEP-53 envelope, then ed25519 verify (panics on mismatch).
+    let mut payload = Bytes::new(env);
+    payload.extend_from_slice(b"Stellar Signed Message:\n");
+    payload.append(&msg);
+    let digest: Bytes = env.crypto().sha256(&payload).into();
+    env.crypto().ed25519_verify(&pubkey, &digest, sig);
+    Ok(())
+}
+
+/// Append the lowercase hex encoding of a 32-byte array (64 ASCII chars).
+fn append_hex(buf: &mut Bytes, bytes: &[u8; 32]) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = [0u8; 64];
+    let mut i = 0;
+    while i < 32 {
+        out[i * 2] = HEX[(bytes[i] >> 4) as usize];
+        out[i * 2 + 1] = HEX[(bytes[i] & 0x0f) as usize];
+        i += 1;
+    }
+    buf.extend_from_slice(&out);
+}
+
+/// Append the base-10 ASCII representation of an unsigned integer.
+fn append_decimal_u128(buf: &mut Bytes, v: u128) {
+    if v == 0 {
+        buf.push_back(b'0');
+        return;
+    }
+    let mut tmp = [0u8; 40]; // u128 max is 39 digits
+    let mut i = tmp.len();
+    let mut n = v;
+    while n > 0 {
+        i -= 1;
+        tmp[i] = b'0' + (n % 10) as u8;
+        n /= 10;
+    }
+    buf.extend_from_slice(&tmp[i..]);
+}
+
+/// Append the base-10 ASCII representation of a signed integer.
+fn append_decimal_i128(buf: &mut Bytes, v: i128) {
+    if v < 0 {
+        buf.push_back(b'-');
+        append_decimal_u128(buf, v.unsigned_abs());
+    } else {
+        append_decimal_u128(buf, v as u128);
+    }
 }
 
 fn validate_fill(env: &Env, fill: &MatchedFill) -> Result<(), CoreError> {
@@ -691,5 +832,89 @@ mod tests {
             fill_price: 100 * PRECISION,
         };
         assert!(s.gateway.try_settle_fill(&fill).is_err());
+    }
+
+    // --- C2: settle_fill_signed on-chain signature verification ---
+    //
+    // Golden vector captured from a real Freighter wallet signature (the wallet
+    // signed the canonical order message via SEP-53). This pins the on-chain
+    // message reconstruction byte-for-byte against the off-chain signer; if the
+    // canonical layout, hex encoding, decimal formatting, SEP-53 prefix, or
+    // domain ever drift, ed25519_verify panics and this test fails.
+
+    const GOLDEN_PUBKEY: [u8; 32] = [
+        0x37, 0x29, 0x3b, 0xc3, 0xe6, 0x17, 0xdb, 0x79, 0xa3, 0x13, 0xbb, 0x5f, 0xe8, 0x2d, 0xeb,
+        0xcf, 0x71, 0x6e, 0x4e, 0x0c, 0x40, 0x56, 0x0e, 0x4c, 0xa3, 0x99, 0xf7, 0x4e, 0xf8, 0xd4,
+        0xbd, 0x40,
+    ];
+    const GOLDEN_SIG: [u8; 64] = [
+        0xa3, 0x1b, 0xd3, 0xdd, 0x51, 0xd5, 0x83, 0x38, 0x82, 0xc3, 0xa1, 0x50, 0x08, 0x0c, 0x7b,
+        0xb3, 0x3f, 0xb5, 0xf3, 0x18, 0x0f, 0xba, 0x69, 0xcf, 0xa7, 0xd3, 0x07, 0x38, 0xd2, 0x79,
+        0xb2, 0x02, 0x11, 0x12, 0x2c, 0x76, 0xbf, 0x5c, 0x6e, 0x4b, 0xf5, 0xb2, 0xde, 0xce, 0x0d,
+        0xb7, 0x93, 0xf4, 0x23, 0x4f, 0x8e, 0x42, 0x31, 0xaf, 0x8e, 0xf6, 0x71, 0xc9, 0xa9, 0x31,
+        0x4b, 0x2a, 0x71, 0x02,
+    ];
+
+    fn golden_order(env: &Env) -> Order {
+        let owner = Address::from_payload(
+            env,
+            AddressPayload::AccountIdPublicKeyEd25519(BytesN::from_array(env, &GOLDEN_PUBKEY)),
+        );
+        Order {
+            owner,
+            market_id: 1,
+            is_long: false,
+            size: 2_220_000,
+            limit_price: 98_250_000_000_000_000,
+            reduce_only: false,
+            nonce: 1_780_730_744_551,
+            expiry_ts: 1_780_734_344,
+        }
+    }
+
+    #[test]
+    fn settle_fill_signed_verifies_real_wallet_signature() {
+        let env = Env::default();
+        let gateway_id = env.register(PerpOrderGatewayContract, ());
+        let order = golden_order(&env);
+        let sig = BytesN::from_array(&env, &GOLDEN_SIG);
+        let domain = Bytes::from_slice(&env, b"Test SDF Network ; September 2015");
+        env.as_contract(&gateway_id, || {
+            env.storage().instance().set(&DataKey::Domain, &domain);
+            // Must not panic — a real wallet signature validates against the
+            // contract's reconstructed canonical message.
+            verify_order_signature(&env, &order, &sig).unwrap();
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn settle_fill_signed_rejects_tampered_order() {
+        let env = Env::default();
+        let gateway_id = env.register(PerpOrderGatewayContract, ());
+        let mut order = golden_order(&env);
+        order.size = 2_220_001; // tamper a single field
+        let sig = BytesN::from_array(&env, &GOLDEN_SIG);
+        let domain = Bytes::from_slice(&env, b"Test SDF Network ; September 2015");
+        env.as_contract(&gateway_id, || {
+            env.storage().instance().set(&DataKey::Domain, &domain);
+            // ed25519_verify panics — the signature no longer matches the message.
+            verify_order_signature(&env, &order, &sig).unwrap();
+        });
+    }
+
+    #[test]
+    #[should_panic]
+    fn settle_fill_signed_rejects_wrong_domain() {
+        let env = Env::default();
+        let gateway_id = env.register(PerpOrderGatewayContract, ());
+        let order = golden_order(&env);
+        let sig = BytesN::from_array(&env, &GOLDEN_SIG);
+        let domain = Bytes::from_slice(&env, b"Public Global Stellar Network ; September 2015");
+        env.as_contract(&gateway_id, || {
+            env.storage().instance().set(&DataKey::Domain, &domain);
+            // Cross-network replay protection: wrong domain → verification fails.
+            verify_order_signature(&env, &order, &sig).unwrap();
+        });
     }
 }

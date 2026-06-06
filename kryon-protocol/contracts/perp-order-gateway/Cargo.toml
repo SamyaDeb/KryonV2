@@ -13,7 +13,11 @@ doctest = false
 
 [dependencies]
 protocol-core = { workspace = true }
-soroban-sdk = { workspace = true }
+# hazmat-address exposes Address::to_payload(), used by settle_fill_signed to
+# extract the owner account's ed25519 public key for on-chain signature
+# verification. Safe here: we verify the holder of the G-address master key
+# signed the order, which is exactly what the wallet's signMessage produces.
+soroban-sdk = { workspace = true, features = ["hazmat-address"] }
 
 [dev-dependencies]
 perp-engine = { workspace = true }
