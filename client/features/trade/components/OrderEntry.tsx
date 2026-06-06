@@ -9,7 +9,7 @@ import { submitOrder } from "@/lib/market/matcher";
 import { useLocalOrders } from "@/stores/orders";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { getBalance } from "@/lib/stellar/contracts";
+import { getBalance, getAccountHealth } from "@/lib/stellar/contracts";
 import { amountToHuman, priceToHuman } from "@/lib/format";
 import { freighterConnect, freighterIsInstalled, isOnExpectedNetwork } from "@/lib/stellar/freighter";
 import { calcLiqPrice } from "@/lib/math";
@@ -160,6 +160,17 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
     refetchInterval: fastPoll ? 2_000 : 10_000,
   });
 
+  const { data: health } = useQuery({
+    queryKey: ["health", address],
+    queryFn: () => getAccountHealth(address!, ASSETS.usdc),
+    enabled: !!address && connected,
+    refetchInterval: fastPoll ? 2_000 : 10_000,
+  });
+
+  // Available to trade = free collateral (balance minus locked margin).
+  // Falls back to raw vault balance when no positions exist yet.
+  const availableToTrade: bigint = health?.freeCollateral ?? balance ?? 0n;
+
   // ── Live mid price: oracle mark → orderbook mid → fallback 0 ───────────────
   const midPriceHuman: number | null = (() => {
     if (rawMarkPrice && rawMarkPrice > 0n) return priceToHuman(rawMarkPrice);
@@ -257,6 +268,18 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
     if (showTpSl && tpsl && !tpPrice && !slPrice && !tpGain && !slLoss) {
       toast.error("Enter a take-profit or stop-loss value");
       return;
+    }
+
+    // Client-side margin check — prevents orders that would fail on-chain settlement
+    const marginRequiredNum = parseFloat(marginRequired);
+    if (marginRequiredNum > 0 && availableToTrade !== undefined) {
+      const availableHuman = amountToHuman(availableToTrade);
+      if (marginRequiredNum > availableHuman) {
+        toast.error(
+          `Insufficient balance — $${marginRequiredNum.toFixed(2)} required, $${availableHuman.toFixed(2)} available. Deposit more USDC or reduce size.`
+        );
+        return;
+      }
     }
 
     setLoading(true);
@@ -403,7 +426,9 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
         <div className={rowCls}>
           <span>Available to Trade</span>
           <span className={valCls}>
-            {connected && balance !== undefined ? `$${amountToHuman(balance).toFixed(2)}` : "—"}
+            {connected && (balance !== undefined || health !== undefined)
+              ? `$${amountToHuman(availableToTrade).toFixed(2)}`
+              : "—"}
           </span>
         </div>
         <div className={rowCls}>
@@ -556,7 +581,7 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || (parseFloat(marginRequired) > 0 && parseFloat(marginRequired) > amountToHuman(availableToTrade))}
             className={`w-full py-[13px] rounded-[9px] text-[13.5px] font-semibold text-white transition-colors disabled:opacity-50 ${
               side === "buy"
                 ? "bg-[#1fae5b] hover:brightness-110"
@@ -565,6 +590,8 @@ export function OrderEntry({ market }: { market: MarketConfig }) {
           >
             {loading
               ? "Placing…"
+              : parseFloat(marginRequired) > 0 && parseFloat(marginRequired) > amountToHuman(availableToTrade)
+              ? "Insufficient Balance"
               : `Place ${side === "buy" ? "Long" : "Short"} ${orderType === "market" ? "Market" : "Limit"} Order`}
           </button>
         )}
