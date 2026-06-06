@@ -9,11 +9,15 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
+// Docs is a separate Docusaurus app (see /docs). Point at it via env so the
+// link works locally (e.g. http://localhost:3002) and in prod (docs.kryon.xyz).
+const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'https://docs.kryon.xyz';
+
 const LANDING_NAV = [
   { to: '/trade/XLM-PERP', label: 'Trade' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/leaderboard', label: 'Leaderboard' },
-  { to: 'https://docs.kryon.xyz', label: 'Docs' },
+  { to: DOCS_URL, label: 'Docs', external: true },
 ];
 
 const SYSTEM_STATUS = [
@@ -415,9 +419,22 @@ export function LandingPage() {
               <div className="s5-menu-panel" onClick={e => e.stopPropagation()}>
                 <button className="s5-menu-close" onClick={() => setMenuOpen(false)}>✕</button>
                 {LANDING_NAV.map(n => (
-                  <Link key={n.to} href={n.to} className="s5-menu-nav-link" onClick={() => setMenuOpen(false)}>
-                    {n.label}
-                  </Link>
+                  n.external ? (
+                    <a
+                      key={n.to}
+                      href={n.to}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="s5-menu-nav-link"
+                      onClick={() => setMenuOpen(false)}
+                    >
+                      {n.label}
+                    </a>
+                  ) : (
+                    <Link key={n.to} href={n.to} className="s5-menu-nav-link" onClick={() => setMenuOpen(false)}>
+                      {n.label}
+                    </Link>
+                  )
                 ))}
                 <div className="s5-menu-divider" />
                 <button
