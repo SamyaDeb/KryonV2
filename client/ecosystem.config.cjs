@@ -55,5 +55,17 @@ module.exports = {
       out_file: "./logs/ws.log",
       error_file: "./logs/ws.error.log",
     },
+    {
+      name: "kryon-reconciler",
+      script: "npx",
+      args: "tsx --env-file=.env.local scripts/settlement-reconciler.ts",
+      cwd: __dirname,
+      restart_delay: 10000,
+      max_restarts: 10,
+      autorestart: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      out_file: "./logs/reconciler.log",
+      error_file: "./logs/reconciler.error.log",
+    },
   ],
 };

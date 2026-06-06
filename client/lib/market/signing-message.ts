@@ -1,3 +1,4 @@
+import { StrKey } from "@stellar/stellar-sdk";
 import { NETWORK } from "@/config";
 import type { OrderIntent } from "./order-intent";
 
@@ -46,6 +47,49 @@ export function orderSigningMessage(o: OrderIntent | Omit<SignedOrderPayload, "s
     ["nonce", o.nonce.toString()],
     ["expiry_ts", expiryTs],
   ]);
+}
+
+function toHex(bytes: Uint8Array): string {
+  let s = "";
+  for (const b of bytes) s += b.toString(16).padStart(2, "0");
+  return s;
+}
+
+/** Lowercase hex of the ed25519 public key behind a Stellar G-address. */
+export function pubkeyHexFromAddress(address: string): string {
+  return toHex(StrKey.decodeEd25519PublicKey(address));
+}
+
+/**
+ * Canonical settlement message for the on-chain signature-verified settlement
+ * path (perp-order-gateway::settle_fill_signed). This MUST byte-match the
+ * contract's `order_canonical_bytes`, which is enforced by the cross-language
+ * golden test `canonical_digest_matches_offchain_golden` in the gateway crate.
+ *
+ * Layout (ASCII, '|'-separated):
+ *   <domain>|place_order|<pubkey_hex>|<market_id>|<is_long 0/1>|<size>|
+ *   <limit_price>|<reduce_only 0/1>|<nonce>|<expiry_ts>
+ *
+ * `domain` is the value passed to gateway.set_domain (the network passphrase).
+ * The wallet signs this via SEP-53 (sha256("Stellar Signed Message:\n" || msg)).
+ */
+export function orderSettlementMessage(
+  domain: string,
+  pubkeyHex: string,
+  o: Omit<SignedOrderPayload, "signature">,
+): string {
+  return [
+    domain,
+    "place_order",
+    pubkeyHex,
+    o.market_id,
+    o.is_long ? 1 : 0,
+    o.size,
+    o.limit_price,
+    o.reduce_only ? 1 : 0,
+    o.nonce,
+    o.expiry_ts,
+  ].join("|");
 }
 
 export function cancelSigningMessage(owner: string, nonce: bigint | string): string {

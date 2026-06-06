@@ -9,8 +9,8 @@ interface Fill {
   id: string | number;
   marketId: number;
   isMaker: boolean;
-  price: number;
-  size: number;
+  price: string | number;
+  size: string | number;
   txHash: string;
   createdAt: number;
 }
@@ -70,8 +70,8 @@ export function TradeHistoryTable({ marketFilter }: { marketFilter: number | "al
                 </span>
               </td>
               <td className="px-3 py-[10px] text-right text-[#a3a3a3]">{f.isMaker ? "Maker" : "Taker"}</td>
-              <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">{f.size.toFixed(4)}</td>
-              <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">${f.price.toFixed(4)}</td>
+              <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">{Number(f.size).toFixed(4)}</td>
+              <td className="px-3 py-[10px] text-right text-[#f5f5f5] font-medium">${Number(f.price).toFixed(4)}</td>
               <td className="pr-4 pl-2 py-[10px] text-right">
                 {onChain ? (
                   <a

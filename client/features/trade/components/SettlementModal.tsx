@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWalletStore } from "@/stores/wallet";
 import { STELLAR_EXPERT_URL } from "@/config";
-import { freighterSignAuthEntry } from "@/lib/stellar/freighter";
+import { freighterSignAuthEntry, isOnExpectedNetwork } from "@/lib/stellar/freighter";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface FillNotification {
   id: string;
@@ -21,6 +22,7 @@ interface PendingSettlement {
   isMaker: boolean;
   fillHash: string;
   authEntryXdr: string;
+  retryNeeded?: boolean;
   fillPrice: string;
   fillSize: string;
   createdAt: string;
@@ -122,13 +124,27 @@ function PendingSettlementCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const role = settlement.isMaker ? "Maker" : "Taker";
+  const queryClient = useQueryClient();
 
   const signSettlement = async () => {
     if (!address || busy) return;
     setBusy(true);
     setError(null);
     try {
-      const signedAuthEntry = await freighterSignAuthEntry(settlement.authEntryXdr);
+      let signedAuthEntry: string;
+
+      if (settlement.retryNeeded) {
+        // Both parties already signed but submission failed (stale fee-payer sequence).
+        // The authEntryXdr is the already-signed entry — just resubmit directly.
+        signedAuthEntry = settlement.authEntryXdr;
+      } else {
+        // Check network before signing — prevents cryptic Freighter error
+        const onCorrectNetwork = await isOnExpectedNetwork();
+        if (!onCorrectNetwork) {
+          throw new Error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+        }
+        signedAuthEntry = await freighterSignAuthEntry(settlement.authEntryXdr);
+      }
       const res = await fetch(`/api/settlements/${settlement.id}/sign`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -139,6 +155,19 @@ function PendingSettlementCard({
         throw new Error(data?.error ?? "Settlement signing failed");
       }
       onSigned();
+      // Poll aggressively for 30s after signing so positions/fills appear as
+      // soon as the on-chain settlement lands (typically 3–10s after signing).
+      const keys = [
+        ["positions", address],
+        ["fills", address],
+        ["balance", address],
+        ["health", address],
+      ];
+      const invalidateAll = () => keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+      invalidateAll();
+      [3_000, 6_000, 10_000, 15_000, 22_000, 30_000].forEach((ms) =>
+        setTimeout(invalidateAll, ms)
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Settlement signing failed");
     } finally {
@@ -164,7 +193,11 @@ function PendingSettlementCard({
       <div className="px-4 py-3 flex flex-col gap-2">
         <Row label="Size" value={`${formatRawAmount(settlement.fillSize)} XLM`} />
         <Row label="Price" value={`$${formatRawPrice(settlement.fillPrice)}`} />
-        <Row label="Status" value="Wallet auth required" valueClass="text-amber-300" />
+        <Row
+          label="Status"
+          value={settlement.retryNeeded ? "Retry settlement" : "Wallet auth required"}
+          valueClass="text-amber-300"
+        />
         {error && <div className="text-[11px] leading-4 text-red-300">{error}</div>}
       </div>
 
@@ -175,7 +208,7 @@ function PendingSettlementCard({
           disabled={busy}
           className="block w-full py-[9px] rounded-[8px] text-center text-[13px] font-semibold text-[#140f07] bg-amber-300 hover:bg-amber-200 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
         >
-          {busy ? "Signing..." : "Sign Settlement"}
+          {busy ? (settlement.retryNeeded ? "Retrying..." : "Signing...") : (settlement.retryNeeded ? "Retry Settlement" : "Sign Settlement")}
         </button>
       </div>
     </div>

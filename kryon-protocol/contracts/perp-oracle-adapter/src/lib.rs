@@ -276,6 +276,12 @@ impl OracleAdapterContract {
             .persistent()
             .get(&DataKey::Price(asset))
             .ok_or(CoreError::StaleOracle)?;
+        // Enforce that the stored snapshot was produced by the correct write path.
+        // Prevents a quorum-configured feed from returning a stale single-source price
+        // (e.g., after upgrading a feed from single-source to quorum).
+        if snapshot.source != config.source {
+            return Err(CoreError::OracleQuorumNotMet);
+        }
         let guard = override_guard.unwrap_or(config.guard);
         snapshot.validate(env.ledger().timestamp(), &guard)?;
         Ok(snapshot)
@@ -638,6 +644,65 @@ mod tests {
             &true,
         );
 
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_price_rejects_stale_single_source_snapshot_after_quorum_upgrade() {
+        // H7: if a feed is upgraded from single-source to quorum, the old single-source
+        // snapshot must NOT be returned — get_price must enforce source == config.source.
+        let env = Env::default();
+        env.mock_all_auths();
+        env.ledger().with_mut(|ledger| {
+            ledger.timestamp = 10;
+        });
+        let admin = Address::generate(&env);
+        let publisher = Address::generate(&env);
+        let pyth = Address::generate(&env);
+        let reflector = Address::generate(&env);
+        let redstone = Address::generate(&env);
+        let asset = Symbol::new(&env, "BTC");
+        let oracle_id = env.register(OracleAdapterContract, ());
+        let oracle = OracleAdapterContractClient::new(&env, &oracle_id);
+
+        oracle.initialize(&admin);
+        oracle.set_feed(
+            &asset,
+            &publisher,
+            &OracleSource::Reflector,
+            &OracleGuard {
+                max_age_secs: 60,
+                max_confidence_bps: 100,
+            },
+            &true,
+        );
+        oracle.write_price(&asset, &publisher, &(100 * PRECISION), &PRECISION, &1);
+
+        // Upgrade feed to quorum — old Reflector snapshot still in storage
+        oracle.set_source_publisher(&asset, &OracleSource::Pyth, &pyth);
+        oracle.set_source_publisher(&asset, &OracleSource::Reflector, &reflector);
+        oracle.set_source_publisher(&asset, &OracleSource::RedStone, &redstone);
+        oracle.set_quorum_feed(
+            &asset,
+            &OracleGuard {
+                max_age_secs: 60,
+                max_confidence_bps: 200,
+            },
+            &Vec::from_array(
+                &env,
+                [
+                    OracleSource::Pyth,
+                    OracleSource::Reflector,
+                    OracleSource::RedStone,
+                ],
+            ),
+            &3,
+            &300,
+            &true,
+        );
+
+        // get_price must reject the stale single-source snapshot
+        let result = oracle.try_get_price(&asset, &None);
         assert!(result.is_err());
     }
 

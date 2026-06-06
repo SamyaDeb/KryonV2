@@ -32,29 +32,44 @@ import {
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { spawnSync } from "child_process";
 
 const RPC_URL   = "https://soroban-testnet.stellar.org";
 const NETWORK   = "Test SDF Network ; September 2015";
 const FEE       = "2000000"; // 0.2 XLM — higher for complex ops
 
-// WASMs already on-chain from original deploy
+// WASMs on-chain (re-uploaded 2026-06-06 with audit fixes: H1-H8, C1, C2, M1)
 const WASM: Record<string, string> = {
-  vault:         "06c578a0f08aacfe5a1ee56614acbbb78da2ebd88d39030613f9b926b72e2783",
-  engine:        "f6549f1931345be1bbeda9ba9de1cc1e57827676cdabad0040423e7541a8c785",
-  orderGateway:  "a959b13019f15d2e0ae7b0e1126920e1b895c64e1de8647865ad1963eb42a5a5",
+  vault:         "7f6adceb81645e03ffa4c1db5c6fff7d4470688ed2abff54535d4458dbdea52d",
+  engine:        "4031914ead31d2e4c1b78a2b646601ad470c0445344c1813b7b939c64bfe883a",
+  orderGateway:  "93f4eb352567df7af08181c7636cfd78b6b47a068858f8b8e0a2e116ef90cb98",
   risk:          "c0dc9f73b67588b55aa3aca4735775dc2fbfb29d7a3681f2634b8221522ef251",
 };
 
 // Existing contracts we keep (already controlled by our key or unchanged)
-const ORACLE_ADAPTER = "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP";
-const USDC_CONTRACT  = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const ORACLE_ADAPTER    = "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP";
+const USDC_CONTRACT     = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const INSURANCE_CONTRACT = process.env.NEXT_PUBLIC_CONTRACT_INSURANCE ?? "CD45VRVGRW6BWMTG4HYKVKFMTOCOHMFGUU226G4363HPIUSPLKPM54KT";
 
 // Market constants (from original deployment config)
 const PRECISION = BigInt("1000000000000000000"); // 1e18
 
 function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
 
-// ── Deploy a contract from an existing WASM hash ──────────────────────────────
+// ── Deploy a contract from an existing WASM hash via stellar CLI ──────────────
+
+/** Wait until the account's sequence number stops changing (all pending TXs cleared). */
+async function waitForSequenceStable(server: sorobanRpc.Server, publicKey: string): Promise<void> {
+  let prev = "";
+  for (let i = 0; i < 24; i++) {
+    await sleep(5000);
+    const acct = await server.getAccount(publicKey);
+    // Account exposes sequence as a string via sequenceNumber() in stellar-sdk
+    const seq = acct.sequenceNumber();
+    if (seq === prev) return; // stable — no more pending TXs
+    prev = seq;
+  }
+}
 
 async function deployContract(
   server: sorobanRpc.Server,
@@ -63,69 +78,47 @@ async function deployContract(
   wasmHash: string,
   label: string
 ): Promise<{ contractId: string; account: Account }> {
-  const salt = crypto.randomBytes(32);
+  // Wait for any previously submitted transactions to settle so the CLI
+  // sees a stable sequence and doesn't get TxBadSeq.
+  await waitForSequenceStable(server, kp.publicKey());
 
-  const deployerScAddr = new Address(kp.publicKey()).toScAddress();
-  const createArgs = new xdr.CreateContractArgs({
-    contractIdPreimage: xdr.ContractIdPreimage.contractIdPreimageFromAddress(
-      new xdr.ContractIdPreimageFromAddress({ address: deployerScAddr, salt })
-    ),
-    executable: xdr.ContractExecutable.contractExecutableWasm(
-      Buffer.from(wasmHash, "hex")
-    ),
-  });
+  const MAX_ATTEMPTS = 5;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    if (attempt === 1) {
+      process.stdout.write(`  [${label}] deploying via CLI...`);
+    } else {
+      process.stdout.write(`  [${label}] retry ${attempt}/${MAX_ATTEMPTS}...`);
+      // Re-stabilise between retries (a timed-out TX may have landed)
+      await waitForSequenceStable(server, kp.publicKey());
+    }
 
-  const deployOp = xdr.Operation.fromXDR(
-    new xdr.Operation({
-      sourceAccount: null,
-      body: xdr.OperationBody.invokeHostFunction(
-        new xdr.InvokeHostFunctionOp({
-          hostFunction: xdr.HostFunction.hostFunctionTypeCreateContract(createArgs),
-          auth: [],
-        })
-      ),
-    }).toXDR()
-  );
+    const result = spawnSync("stellar", [
+      "contract", "deploy",
+      "--wasm-hash", wasmHash,
+      "--source-account", kp.secret(),
+      "--network", "testnet",
+      "--fee", "2000000",
+      "--no-cache",
+    ], { encoding: "utf8", timeout: 180_000 });
 
-  // Compute contract ID
-  const networkId   = hash(Buffer.from(NETWORK));
-  const preimage    = xdr.HashIdPreimage.envelopeTypeContractId(
-    new xdr.HashIdPreimageContractId({
-      networkId,
-      contractIdPreimage: xdr.ContractIdPreimage.contractIdPreimageFromAddress(
-        new xdr.ContractIdPreimageFromAddress({ address: deployerScAddr, salt })
-      ),
-    })
-  );
-  const contractId = StrKey.encodeContract(hash(preimage.toXDR()));
+    const contractId = result.stdout.trim();
+    if (result.status === 0 && contractId) {
+      process.stdout.write(` ✓ ${contractId.slice(0, 10)}...\n`);
+      const newAccount = await server.getAccount(kp.publicKey());
+      return { contractId, account: newAccount };
+    }
 
-  const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK })
-    .addOperation(deployOp)
-    .setTimeout(60)
-    .build();
+    const stderr = result.stderr ?? "";
+    const isTimeout = stderr.includes("timeout") || result.status === null;
+    const isBadSeq = stderr.includes("TxBadSeq");
+    process.stdout.write(isTimeout ? ` timeout, will retry\n` : isBadSeq ? ` TxBadSeq, will retry\n` : ` failed\n`);
 
-  const sim = await server.simulateTransaction(tx);
-  if (sorobanRpc.Api.isSimulationError(sim)) {
-    throw new Error(`Deploy ${label} sim failed: ${(sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error?.slice(0, 200)}`);
+    if ((!isTimeout && !isBadSeq) || attempt === MAX_ATTEMPTS) {
+      throw new Error(`Deploy ${label} failed after ${attempt} attempt(s):\nstdout: ${result.stdout}\nstderr: ${result.stderr}`);
+    }
   }
-
-  const prepared = sorobanRpc.assembleTransaction(tx, sim).build();
-  prepared.sign(kp);
-
-  process.stdout.write(`  [${label}] deploying → ${contractId.slice(0, 10)}...`);
-  const send = await server.sendTransaction(prepared);
-  if (send.status === "ERROR") throw new Error(`Deploy ${label} failed: ${send.errorResult?.toXDR("base64")}`);
-
-  for (let i = 0; i < 30; i++) {
-    await sleep(1000);
-    const poll = await server.getTransaction(send.hash);
-    if (poll.status === "SUCCESS") { process.stdout.write(` ✓\n`); break; }
-    if (poll.status === "FAILED") throw new Error(`Deploy ${label} tx failed`);
-    process.stdout.write(".");
-  }
-
-  const newAccount = await server.getAccount(kp.publicKey());
-  return { contractId, account: newAccount };
+  // unreachable
+  throw new Error(`Deploy ${label}: exhausted retries`);
 }
 
 // ── Call a contract function and wait for confirmation ────────────────────────
@@ -140,30 +133,47 @@ async function callContract(
   label: string
 ): Promise<Account> {
   const contract = new Contract(contractId);
-  const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK })
-    .addOperation(contract.call(method, ...args))
-    .setTimeout(60)
-    .build();
 
-  const sim = await server.simulateTransaction(tx);
-  if (sorobanRpc.Api.isSimulationError(sim)) {
-    throw new Error(`${label} sim failed: ${(sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error?.slice(0, 200)}`);
-  }
+  const buildAndSend = async (acct: Account) => {
+    const tx = new TransactionBuilder(acct, { fee: FEE, networkPassphrase: NETWORK })
+      .addOperation(contract.call(method, ...args))
+      .setTimeout(60)
+      .build();
 
-  const prepared = sorobanRpc.assembleTransaction(tx, sim).build();
-  prepared.sign(kp);
+    const sim = await server.simulateTransaction(tx);
+    if (sorobanRpc.Api.isSimulationError(sim)) {
+      throw new Error(`${label} sim failed: ${(sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error?.slice(0, 200)}`);
+    }
+
+    const prepared = sorobanRpc.assembleTransaction(tx, sim).build();
+    prepared.sign(kp);
+
+    const send = await server.sendTransaction(prepared);
+    if (send.status === "ERROR") throw new Error(`${label} submit failed`);
+    return send.hash;
+  };
 
   process.stdout.write(`  [${label}]...`);
-  const send = await server.sendTransaction(prepared);
-  if (send.status === "ERROR") throw new Error(`${label} submit failed`);
 
-  for (let i = 0; i < 30; i++) {
-    await sleep(1000);
-    const poll = await server.getTransaction(send.hash);
-    if (poll.status === "SUCCESS") { process.stdout.write(` ✓\n`); break; }
-    if (poll.status === "FAILED") throw new Error(`${label} tx failed`);
-    process.stdout.write(".");
+  let confirmed = false;
+  for (let attempt = 0; attempt < 2 && !confirmed; attempt++) {
+    if (attempt > 0) {
+      process.stdout.write(` retrying...`);
+      account = await server.getAccount(kp.publicKey());
+    }
+
+    const txHash = await buildAndSend(account);
+
+    for (let i = 0; i < 60; i++) {
+      await sleep(2000);
+      const poll = await server.getTransaction(txHash);
+      if (poll.status === "SUCCESS") { process.stdout.write(` ✓\n`); confirmed = true; break; }
+      if (poll.status === "FAILED") throw new Error(`${label} tx failed on-chain`);
+      process.stdout.write(".");
+    }
   }
+
+  if (!confirmed) throw new Error(`${label} timed out after 2 attempts`);
 
   return server.getAccount(kp.publicKey());
 }
@@ -257,6 +267,10 @@ async function main() {
   account = await callContract(server, kp, account, vaultId, "set_collateral",
     [addr(USDC_CONTRACT), xdr.ScVal.scvSymbol("USDC"), u32(0), xdr.ScVal.scvBool(true)], "vault.set_collateral(USDC)");
 
+  // M1: wire insurance address on engine so update_funding can route surplus/deficit
+  account = await callContract(server, kp, account, engineId, "set_insurance",
+    [addr(INSURANCE_CONTRACT)], "engine.set_insurance");
+
   console.log("");
 
   // ── Configure XLM-PERP market ────────────────────────────────────────────
@@ -303,10 +317,16 @@ async function main() {
   const configPath = path.resolve(__dirname, "../config/index.ts");
   let configSrc = fs.readFileSync(configPath, "utf8");
 
+  // Config may use plain string OR envOrDefault("ENV_VAR", "fallback") — handle both.
   const patches: [RegExp, string][] = [
-    [/vault:\s*["'][^"']+["']/, `vault: "${vaultId}"`],
-    [/engine:\s*["'][^"']+["']/, `engine: "${engineId}"`],
-    [/orderGateway:\s*["'][^"']+["']/, `orderGateway: "${gatewayId}"`],
+    // envOrDefault form:  vault: envOrDefault("...", "OLD_ADDR"),
+    [/(\bvault:\s*envOrDefault\([^,]+,\s*")[^"]+(")/,         `$1${vaultId}$2`],
+    [/(\bengine:\s*envOrDefault\([^,]+,\s*")[^"]+(")/,        `$1${engineId}$2`],
+    [/(\borderGateway:\s*envOrDefault\([^,]+,\s*")[^"]+(")/,  `$1${gatewayId}$2`],
+    // plain-string form: vault: "OLD_ADDR"
+    [/(\bvault:\s*")[^"]+(")/,        `$1${vaultId}$2`],
+    [/(\bengine:\s*")[^"]+(")/,       `$1${engineId}$2`],
+    [/(\borderGateway:\s*")[^"]+(")/,  `$1${gatewayId}$2`],
   ];
 
   for (const [regex, replacement] of patches) {

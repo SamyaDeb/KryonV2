@@ -37,3 +37,9 @@ services:
       PORT: "8080"
     ports:
       - "8080:8080"
+
+  reconciler:
+    <<: *common
+    environment:
+      SERVICE: settlement-reconciler
+      SETTLEMENT_JOB_MAX_AGE_MINUTES: "15"

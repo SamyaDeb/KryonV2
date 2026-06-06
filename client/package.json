@@ -11,6 +11,7 @@
     "dev:indexer": "tsx --env-file=.env.local scripts/state-indexer.ts",
     "dev:matcher": "tsx --env-file=.env.local scripts/matcher-service.ts",
     "dev:ws": "tsx --env-file=.env.local scripts/ws-server.ts",
+    "dev:reconciler": "tsx --env-file=.env.local scripts/settlement-reconciler.ts",
     "dev:monitor": "tsx --env-file=.env.local scripts/monitor.ts",
     "dev:e2e": "tsx --env-file=.env.local scripts/e2e-testnet.ts",
     "dev:soak": "tsx --env-file=.env.local scripts/soak-test.ts",

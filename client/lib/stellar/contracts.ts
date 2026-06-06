@@ -61,6 +61,19 @@ export async function getBalance(
   return val ? scValToI128(val) : 0n;
 }
 
+// Returns the user's actual token wallet balance by querying the token contract directly.
+export async function getTokenBalance(
+  userAddress: string,
+  assetAddress: string = ASSETS.usdc
+): Promise<bigint> {
+  const val = await simulateRead(
+    assetAddress,
+    "balance",
+    [addressToScVal(userAddress)]
+  );
+  return val ? scValToI128(val) : 0n;
+}
+
 export async function getAccountHealth(
   userAddress: string,
   assetAddress: string = ASSETS.usdc

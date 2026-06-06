@@ -198,3 +198,75 @@ export async function simulateSettleFill(fill: {
     return null;
   }
 }
+
+// ── settle_fill_signed: submit with pre-stored maker/taker signatures ─────────
+
+/** Decode a Freighter-returned base64 or hex signature to a 64-byte Buffer. */
+function decodeSig(sig: string): Buffer {
+  const s = sig.trim();
+  if (/^[0-9a-fA-F]{128}$/.test(s)) return Buffer.from(s, "hex");
+  return Buffer.from(s, "base64");
+}
+
+function bytesN64Val(sig: string): xdr.ScVal {
+  const buf = decodeSig(sig);
+  if (buf.length !== 64) throw new Error(`sig must be 64 bytes, got ${buf.length}`);
+  return xdr.ScVal.scvBytes(buf);
+}
+
+export async function submitSettleFillSigned(fill: {
+  maker: Parameters<typeof orderToScVal>[0];
+  taker: Parameters<typeof orderToScVal>[0];
+  fillSize: bigint;
+  fillPrice: bigint;
+  fillHash: string;
+  feePayerSecret: string;
+  makerSig: string;
+  takerSig: string;
+}): Promise<string | null> {
+  try {
+    const server = new sorobanRpc.Server(NETWORK.rpcUrl);
+    const feeKp = Keypair.fromSecret(fill.feePayerSecret);
+    const account = await server.getAccount(feeKp.publicKey());
+    const contract = new Contract(CONTRACTS.orderGateway);
+
+    const fillArg = matchedFillToScVal(fill);
+    const makerSigArg = bytesN64Val(fill.makerSig);
+    const takerSigArg = bytesN64Val(fill.takerSig);
+
+    const tx = new TransactionBuilder(account, { fee: FEE, networkPassphrase: NETWORK.passphrase })
+      .addOperation(contract.call("settle_fill_signed", fillArg, makerSigArg, takerSigArg))
+      .setTimeout(60)
+      .build();
+
+    const sim = await server.simulateTransaction(tx);
+    if (sorobanRpc.Api.isSimulationError(sim)) {
+      console.error("settle_fill_signed sim error:", (sim as sorobanRpc.Api.SimulateTransactionErrorResponse).error?.slice(0, 200));
+      return null;
+    }
+
+    const prepared = sorobanRpc.assembleTransaction(tx, sim).build();
+    prepared.sign(feeKp);
+
+    const send = await server.sendTransaction(prepared);
+    if (send.status === "ERROR") {
+      console.error("settle_fill_signed submit error");
+      return null;
+    }
+
+    // Poll for confirmation
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 2000));
+      const poll = await server.getTransaction(send.hash);
+      if (poll.status === "SUCCESS") return send.hash;
+      if (poll.status === "FAILED") {
+        console.error("settle_fill_signed tx failed");
+        return null;
+      }
+    }
+    return null;
+  } catch (e) {
+    console.error("submitSettleFillSigned error:", (e as Error).message?.slice(0, 200));
+    return null;
+  }
+}

@@ -23,11 +23,12 @@ import { neon, neonConfig, type NeonQueryFunction } from "@neondatabase/serverle
 // after idle periods by re-establishing the HTTP connection as needed.
 neonConfig.fetchConnectionCache = true;
 import { ACTIVE_MARKETS, NETWORK } from "../config";
-import { simulateSettleFill } from "../lib/stellar/settlement";
+import { simulateSettleFill, submitSettleFillSigned } from "../lib/stellar/settlement";
+import { assertRequiredSecrets, assertNoPublicSecretLeak } from "../lib/secrets-check";
+assertRequiredSecrets(["DATABASE_URL"]);
+assertNoPublicSecretLeak();
 
 type Sql = NeonQueryFunction<false, false>;
-
-const POLL_INTERVAL_MS = 1_000;
 const NETWORK_NAME = NETWORK.name;
 const PRICE_PRECISION = 1e18;
 const AMOUNT_PRECISION = 1e7;
@@ -47,6 +48,7 @@ interface RestingOrder {
   expiryTs: bigint;
   filledSize: bigint;
   createdAt: Date;
+  signature: string | null;
 }
 
 interface MatchResult {
@@ -71,6 +73,7 @@ function mapOrderRow(r: Record<string, unknown>): RestingOrder {
     expiryTs:   BigInt(r.expiryTs as string),
     filledSize: BigInt(r.filledSize as string),
     createdAt:  new Date(r.createdAt as string),
+    signature:  r.signature != null ? String(r.signature) : null,
   };
 }
 
@@ -81,7 +84,7 @@ async function loadRestingOrders(sql: Sql, marketId: number): Promise<RestingOrd
       id, owner, "marketId", "isLong",
       size::text, "limitPrice"::text, "reduceOnly",
       nonce::text, "expiryTs"::text, "filledSize"::text,
-      "createdAt"
+      "createdAt", signature
     FROM "Order"
     WHERE
       "marketId"   = ${marketId}
@@ -101,7 +104,7 @@ async function loadMarketOrders(sql: Sql, marketId: number): Promise<RestingOrde
       id, owner, "marketId", "isLong",
       size::text, "limitPrice"::text, "reduceOnly",
       nonce::text, "expiryTs"::text, "filledSize"::text,
-      "createdAt"
+      "createdAt", signature
     FROM "Order"
     WHERE
       "marketId"   = ${marketId}
@@ -246,19 +249,27 @@ async function persistFill(sql: Sql, match: MatchResult): Promise<boolean> {
     // If DO NOTHING fired (duplicate fill), skip the filledSize updates
     if (!inserted || inserted.length === 0) return false;
 
-    // Update filledSize on both orders
-    await sql`
+    // H3: Atomic filledSize increment — read-modify-write in a single statement.
+    // The WHERE guard ensures we never overflow size (treats as duplicate if it would).
+    const makerUpdated = await sql`
       UPDATE "Order"
       SET "filledSize" = ("filledSize"::numeric + ${fillSize.toString()}::numeric)::text,
           "updatedAt"  = NOW()
       WHERE id = ${maker.id}
+        AND "filledSize"::numeric + ${fillSize.toString()}::numeric <= size::numeric
+      RETURNING id
     `;
-    await sql`
+    if (!makerUpdated || makerUpdated.length === 0) return false;
+
+    const takerUpdated = await sql`
       UPDATE "Order"
       SET "filledSize" = ("filledSize"::numeric + ${fillSize.toString()}::numeric)::text,
           "updatedAt"  = NOW()
       WHERE id = ${taker.id}
+        AND "filledSize"::numeric + ${fillSize.toString()}::numeric <= size::numeric
+      RETURNING id
     `;
+    if (!takerUpdated || takerUpdated.length === 0) return false;
 
     // Update Market.lastPrice and volume
     const fillValue = (fillSize * fillPrice) / BigInt(Math.round(PRICE_PRECISION));
@@ -319,6 +330,51 @@ async function executeSettlement(sql: Sql, match: MatchResult): Promise<boolean>
   if (!feePayerSecret) return false;
 
   const fillHash = pseudoTxHash(match.maker, match.taker, match.fillSize);
+
+  // C2 fast path: both parties have stored settlement signatures — submit directly.
+  if (match.maker.signature && match.taker.signature) {
+    const txHash = await submitSettleFillSigned({
+      maker: {
+        owner:      match.maker.owner,
+        marketId:   match.maker.marketId,
+        isLong:     match.maker.isLong,
+        size:       match.maker.size,
+        limitPrice: match.maker.limitPrice,
+        reduceOnly: match.maker.reduceOnly,
+        nonce:      match.maker.nonce,
+        expiryTs:   match.maker.expiryTs,
+      },
+      taker: {
+        owner:      match.taker.owner,
+        marketId:   match.taker.marketId,
+        isLong:     match.taker.isLong,
+        size:       match.taker.size,
+        limitPrice: match.taker.limitPrice,
+        reduceOnly: match.taker.reduceOnly,
+        nonce:      match.taker.nonce,
+        expiryTs:   match.taker.expiryTs,
+      },
+      fillSize:      match.fillSize,
+      fillPrice:     match.fillPrice,
+      fillHash,
+      feePayerSecret,
+      makerSig: match.maker.signature,
+      takerSig: match.taker.signature,
+    });
+
+    if (txHash) {
+      process.stdout.write(`  ✓ settled signed: ${txHash.slice(0, 12)}...\n`);
+      await sql`
+        INSERT INTO "TxJob" (network, kind, "payloadHash", "unsignedXdr", status, "submittedHash", "nextAttemptAt", "createdAt", "updatedAt")
+        VALUES (${NETWORK_NAME}, 'settle_fill', ${fillHash}, '{}', 'CONFIRMED', ${txHash}, NOW(), NOW(), NOW())
+        ON CONFLICT (network, kind, "payloadHash") DO UPDATE SET status = 'CONFIRMED', "submittedHash" = EXCLUDED."submittedHash", "updatedAt" = NOW()
+      `;
+      return true;
+    }
+    return false;
+  }
+
+  // Fallback: auth-entry queue (old path for orders without stored signatures).
   const pending = await simulateSettleFill({
     maker: {
       owner:      match.maker.owner,
@@ -418,6 +474,7 @@ async function tick(sql: Sql) {
         }
       }
     }
+
   }
 
   return totalFills;

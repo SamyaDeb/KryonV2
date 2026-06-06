@@ -11,6 +11,7 @@ import { PositionsTable } from "./PositionsTable";
 import { OpenOrdersTable } from "./OpenOrdersTable";
 import { OrderHistoryTable } from "./OrderHistoryTable";
 import { TradeHistoryTable } from "./TradeHistoryTable";
+import { FundingHistoryTable } from "./FundingHistoryTable";
 
 const CaretIcon = () => (
   <svg width={10} height={10} viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6">
@@ -140,7 +141,7 @@ export function BottomPanel({ marketId }: { marketId: number }) {
         {activeTab === "Open Orders" && <OpenOrdersTable marketFilter={marketFilter} sideFilter={sideFilter} />}
         {activeTab === "Trade History" && <TradeHistoryTable marketFilter={marketFilter} />}
         {activeTab === "Order History" && <OrderHistoryTable marketFilter={marketFilter} sideFilter={sideFilter} />}
-        {activeTab === "Funding History" && <EmptyState tab="Funding History" />}
+        {activeTab === "Funding History" && <FundingHistoryTable marketFilter={marketFilter} />}
       </div>
     </div>
   );
@@ -167,10 +168,3 @@ function MenuItem({
   );
 }
 
-function EmptyState({ tab }: { tab: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#a3a3a3]">
-      <span className="text-[#a3a3a3] text-[12.5px]">No {tab.toLowerCase()} yet</span>
-    </div>
-  );
-}

@@ -4,6 +4,9 @@
 use protocol_core::CoreError;
 use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Symbol};
 
+/// 48 hours — minimum timelock delay for privileged protocol operations.
+const MIN_SAFE_DELAY_SECS: u64 = 172_800;
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
@@ -48,7 +51,7 @@ impl PerpGovernanceContract {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(CoreError::AlreadyInitialized);
         }
-        if min_delay_secs == 0 {
+        if min_delay_secs < MIN_SAFE_DELAY_SECS {
             return Err(CoreError::InvalidConfig);
         }
         admin.require_auth();
@@ -215,6 +218,7 @@ mod tests {
         Address, BytesN, Env, Symbol,
     };
 
+    // MIN_SAFE_DELAY_SECS = 172_800 (48 h). Tests use timestamp=100 so earliest ETA = 172_900.
     fn setup() -> (Env, Address, Address, PerpGovernanceContractClient<'static>) {
         let env = Env::default();
         env.mock_all_auths();
@@ -225,19 +229,33 @@ mod tests {
         let guardian = Address::generate(&env);
         let contract_id = env.register(PerpGovernanceContract, ());
         let governance = PerpGovernanceContractClient::new(&env, &contract_id);
-        governance.initialize(&admin, &guardian, &60);
+        governance.initialize(&admin, &guardian, &MIN_SAFE_DELAY_SECS);
         (env, admin, guardian, governance)
+    }
+
+    #[test]
+    fn rejects_delay_below_48h() {
+        let env = Env::default();
+        env.mock_all_auths();
+        let admin = Address::generate(&env);
+        let guardian = Address::generate(&env);
+        let contract_id = env.register(PerpGovernanceContract, ());
+        let governance = PerpGovernanceContractClient::new(&env, &contract_id);
+        // 1 hour — below the 48 h minimum
+        let result = governance.try_initialize(&admin, &guardian, &3_600u64);
+        assert!(result.is_err());
     }
 
     #[test]
     fn rejects_short_timelock_eta() {
         let (env, _admin, _guardian, governance) = setup();
+        // ETA must be >= timestamp(100) + MIN_SAFE_DELAY_SECS(172_800) = 172_900
         let result = governance.try_queue(
             &id(&env, 1),
             &Address::generate(&env),
             &Symbol::new(&env, "upgrade"),
             &id(&env, 2),
-            &159,
+            &172_899,
         );
 
         assert!(result.is_err());
@@ -252,10 +270,10 @@ mod tests {
             &Address::generate(&env),
             &Symbol::new(&env, "upgrade"),
             &id(&env, 4),
-            &160,
+            &172_900,
         );
         env.ledger().with_mut(|ledger| {
-            ledger.timestamp = 160;
+            ledger.timestamp = 172_900;
         });
 
         let executed = governance.execute(&proposal_id);

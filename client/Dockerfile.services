@@ -8,6 +8,6 @@ COPY . .
 RUN npm install tsx --save-dev
 
 # Each service is selected via SERVICE env var
-# oracle-keeper | matcher | ws-server | state-indexer | monitor
+# oracle-keeper | matcher | ws-server | state-indexer | monitor | settlement-reconciler
 
 CMD ["sh", "-c", "npx tsx scripts/${SERVICE}.ts"]

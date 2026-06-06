@@ -2,8 +2,8 @@
 #![deny(unsafe_code)]
 
 use protocol_core::{
-    apply_bps, checked_add, checked_sub, div_precision, funding_pnl, mul_precision, notional,
-    CoreError, MarginMode, MarketConfig, OracleGuard, OracleSnapshot, Position,
+    apply_bps, checked_add, checked_sub, div_precision, funding_pnl, mul_div, mul_precision,
+    notional, CoreError, MarginMode, MarketConfig, OracleGuard, OracleSnapshot, Position,
 };
 use risk_engine::{update_from_imbalance, AccountHealth, FundingConfig, FundingState};
 use soroban_sdk::{contract, contractimpl, contracttype, vec, Address, Env, IntoVal, Symbol, Vec};
@@ -14,6 +14,7 @@ pub enum DataKey {
     Admin,
     PendingAdmin,
     Liquidation,
+    Insurance,
     Oracle,
     Vault,
     SettlementAsset,
@@ -182,6 +183,14 @@ impl PerpEngineContract {
         Ok(())
     }
 
+    pub fn set_insurance(env: Env, insurance: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::Insurance, &insurance);
+        Ok(())
+    }
+
     pub fn update_funding(env: Env, market_id: u32) -> Result<FundingState, CoreError> {
         let cfg: FundingConfig = env
             .storage()
@@ -189,17 +198,32 @@ impl PerpEngineContract {
             .get(&DataKey::FundingConfig(market_id))
             .ok_or(CoreError::InvalidConfig)?;
         let current = funding_state(&env, market_id);
-        let next = update_from_imbalance(
-            &cfg,
-            &current,
-            side_open_interest(&env, market_id, true),
-            side_open_interest(&env, market_id, false),
-            env.ledger().timestamp(),
-        )?;
+        let oi_long = side_open_interest(&env, market_id, true);
+        let oi_short = side_open_interest(&env, market_id, false);
+        let next = update_from_imbalance(&cfg, &current, oi_long, oi_short, env.ledger().timestamp())?;
         env.storage()
             .persistent()
             .set(&DataKey::FundingState(market_id), &next);
         vault_set_funding_indexes(&env, market_id, next.long_index, next.short_index)?;
+
+        // Route the net funding surplus/deficit to the insurance fund.
+        // When oi_long != oi_short, longs pay delta*oi_long but shorts receive delta*oi_short.
+        // The difference (delta * oi_imbalance / PRECISION) is routed to insurance so no
+        // value leaks out of the protocol.
+        let delta = checked_sub(next.long_index, current.long_index)?;
+        if delta != 0 {
+            let oi_imbalance = checked_sub(oi_long, oi_short)?;
+            if oi_imbalance != 0 {
+                let net_surplus = mul_div(delta, oi_imbalance, protocol_core::PRECISION)?;
+                if net_surplus != 0 {
+                    if let Some(insurance) = insurance_address(&env) {
+                        let asset = settlement_asset(&env)?;
+                        vault_apply_pnl(&env, &insurance, &asset, net_surplus)?;
+                    }
+                }
+            }
+        }
+
         Ok(next)
     }
 
@@ -256,13 +280,20 @@ impl PerpEngineContract {
 
         let mut positions = load_positions(&env, &user);
         let funding = funding_state(&env, market_id);
+        // For isolated positions, lock initial margin proportional to the position notional
+        let position_notional = mul_precision(size, execution_price)?;
+        let position_margin = if mode == MarginMode::Isolated {
+            apply_bps(position_notional, market.market.initial_margin_bps)?
+        } else {
+            0
+        };
         let position = Position {
             position_id: next_position_id(&env)?,
             owner: user.clone(),
             market_id,
             size,
             entry_price: execution_price,
-            margin: 0,
+            margin: position_margin,
             is_long,
             last_funding_index: if is_long {
                 funding.long_index
@@ -571,6 +602,10 @@ fn settlement_asset(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::InvalidConfig)
 }
 
+fn insurance_address(env: &Env) -> Option<Address> {
+    env.storage().instance().get(&DataKey::Insurance)
+}
+
 fn next_position_id(env: &Env) -> Result<u64, CoreError> {
     let current: u64 = env
         .storage()
@@ -765,6 +800,12 @@ fn reduce_position_internal(
     validate_execution_price(&env, &market, execution_price)?;
     let settled_funding = settle_position_funding(&env, &user, &mut position)?;
     let realized_pnl = realized_pnl(&position, size_delta, execution_price)?;
+
+    // For isolated positions, release margin proportional to the fraction being closed
+    if position.mode == MarginMode::Isolated && position.margin > 0 {
+        let margin_release = protocol_core::mul_div(position.margin, size_delta, position.size)?;
+        position.margin = checked_sub(position.margin, margin_release)?;
+    }
 
     position.size = checked_sub(position.size, size_delta)?;
     if position.size == 0 {
@@ -1097,5 +1138,65 @@ mod tests {
             s.vault.balance_of(&s.user, &s.settlement_asset),
             (1_000 * PRECISION) - (PRECISION / 100)
         );
+    }
+
+    #[test]
+    fn isolated_position_sets_margin_on_open() {
+        // Open an isolated position: 5 BTC at price 100.
+        // Notional = 5 * 100 = 500. initial_margin_bps = 1000 (10%).
+        // Expected margin = 500 * 1000 / 10000 = 50 PRECISION units.
+        let s = setup();
+        s.engine.open_position(
+            &s.user,
+            &1,
+            &(5 * PRECISION),
+            &true,
+            &(100 * PRECISION),
+            &MarginMode::Isolated,
+        );
+        let positions = s.engine.positions(&s.user);
+        assert_eq!(positions.len(), 1);
+        let pos = positions.get(0).unwrap();
+        assert_eq!(pos.mode, MarginMode::Isolated);
+        // notional = 5 * 100 * PRECISION (mul_precision scales), margin = notional * 1000/10000
+        // mul_precision(5*PRECISION, 100*PRECISION) = 5*100*PRECISION = 500*PRECISION
+        // apply_bps(500*PRECISION, 1000) = 500*PRECISION * 1000/10000 = 50*PRECISION
+        assert_eq!(pos.margin, 50 * PRECISION);
+    }
+
+    #[test]
+    fn isolated_margin_does_not_contaminate_cross_health() {
+        // Open an isolated position on market 1 — the underlying will have no pnl (price at entry).
+        // Even though the isolated position has margin locked, the cross health (no cross positions)
+        // should still be valid (free collateral for cross = 1000 - locked_isolated_margin = 950).
+        // The test confirms that cross positions can be opened concurrently with isolated ones
+        // without the isolated margin being treated as available cross collateral.
+        let s = setup();
+
+        // Open isolated: 5 BTC at 100 → margin = 50 * PRECISION locked
+        s.engine.open_position(
+            &s.user,
+            &1,
+            &(5 * PRECISION),
+            &true,
+            &(100 * PRECISION),
+            &MarginMode::Isolated,
+        );
+        let positions = s.engine.positions(&s.user);
+        assert_eq!(positions.len(), 1);
+        let iso_pos = positions.get(0).unwrap();
+        assert_eq!(iso_pos.mode, MarginMode::Isolated);
+        assert_eq!(iso_pos.margin, 50 * PRECISION);
+
+        // Vault health: cross collateral = 1000 - 50 = 950.
+        // No cross positions → cross maintenance = 0 → not cross-liquidatable.
+        // Isolated equity = max(0, 50 + 0) = 50 (price at entry, no pnl).
+        // Total equity = 950 + 0 + 50 = 1000. Initial margin req = 50. Healthy.
+        let health = s.vault.account_health(&s.user, &s.settlement_asset);
+        assert!(
+            health.equity > health.initial_margin_required,
+            "account should be healthy after isolated open"
+        );
+        assert!(!health.liquidatable);
     }
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useWalletStore } from "@/stores/wallet";
 import { useMarketStore } from "@/stores/market";
 import { getPositions, getAccountHealth, RawPosition } from "@/lib/stellar/contracts";
@@ -26,8 +26,9 @@ export function PositionsTable({
   const addOrder = useLocalOrders((s) => s.addOrder);
   const markPrices = useMarketStore((s) => s.markPrices);
   const { hidePnl, hideLiqPrice } = useTradeSettings();
+  const queryClient = useQueryClient();
 
-  const { data: positions = [], refetch } = useQuery({
+  const { data: positions = [] } = useQuery({
     queryKey: ["positions", address],
     queryFn: () => getPositions(address!),
     enabled: !!address && connected,
@@ -93,20 +94,35 @@ export function PositionsTable({
             hideLiqPrice={hideLiqPrice}
             onClose={async () => {
               if (!address) return;
+              // Close is a market order in the opposite direction.
+              // Must use an aggressive limit price (not 0) — the gateway rejects
+              // limit_price <= 0. Closing a long = selling → use 0.5× mark.
+              // Closing a short = buying → use 2× mark. Both cross any resting order.
+              const mark = markPrices[pos.marketId];
+              const closeIsLong = !pos.isLong;
+              const aggPrice = mark && mark > 0n
+                ? (closeIsLong ? mark * 2n : mark / 2n || 1n)
+                : 1n;
               const intent = buildOrderIntent({
                 owner: address,
                 marketId: pos.marketId,
-                isLong: !pos.isLong,
+                isLong: closeIsLong,
                 size: pos.size,
-                limitPrice: 0n,
+                limitPrice: aggPrice,
                 reduceOnly: true,
                 ttlSeconds: 60,
               });
               addOrder(intent);
               const result = await submitOrder(intent);
-              if (result.ok) toast.success("Close order submitted");
-              else toast.warning(`Close order stored locally. ${result.error}`);
-              refetch();
+              if (result.ok) {
+                toast.success("Close order submitted");
+                const keys = [["positions", address], ["fills", address], ["balance", address], ["health", address]];
+                const invalidateAll = () => keys.forEach((key) => queryClient.invalidateQueries({ queryKey: key }));
+                invalidateAll();
+                [3_000, 6_000, 10_000, 15_000, 22_000, 30_000].forEach((ms) => setTimeout(invalidateAll, ms));
+              } else {
+                toast.warning(`Close order stored locally. ${result.error}`);
+              }
             }}
           />
         ))}

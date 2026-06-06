@@ -24,6 +24,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }
   const o = result.order;
+  const sig = typeof (body as Record<string, unknown>).signature === "string"
+    ? (body as Record<string, unknown>).signature as string
+    : null;
   if (!(await rateLimit(requestKey(req, o.owner), 30))) {
     return NextResponse.json({ ok: false, error: "Too many order requests" }, { status: 429 });
   }
@@ -44,7 +47,7 @@ export async function POST(req: NextRequest) {
         INSERT INTO "Order" (
           id, owner, "marketId", "isLong", size, "limitPrice",
           "reduceOnly", nonce, "expiryTs", cancelled, "filledSize",
-          "createdAt", "updatedAt"
+          signature, "createdAt", "updatedAt"
         ) VALUES (
           ${o.owner + ":" + o.nonce.toString()},
           ${o.owner},
@@ -57,6 +60,7 @@ export async function POST(req: NextRequest) {
           ${o.expiryTs},
           false,
           '0',
+          ${sig},
           NOW(),
           NOW()
         )

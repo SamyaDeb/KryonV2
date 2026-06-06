@@ -98,6 +98,29 @@ impl PerpLiquidationContract {
         Ok(())
     }
 
+    /// Re-point dependencies after a redeploy. Without these, redeploying the
+    /// vault/engine/insurance would strand the liquidation contract on dead
+    /// addresses (the values are otherwise only set at `initialize`).
+    pub fn set_engine(env: Env, engine: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Engine, &engine);
+        Ok(())
+    }
+
+    pub fn set_vault(env: Env, vault: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Vault, &vault);
+        Ok(())
+    }
+
+    pub fn set_insurance(env: Env, insurance: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::Insurance, &insurance);
+        Ok(())
+    }
+
     pub fn liquidate(
         env: Env,
         liquidator: Address,
@@ -135,8 +158,11 @@ impl PerpLiquidationContract {
         if reward > 0 {
             insurance_pay_liquidator(&env, &liquidator, &settlement_asset, reward)?;
         }
+        // Restore solvency: the vault pulls real tokens from the insurance fund
+        // to back any underwater balance and records the uncovered remainder as
+        // bad debt. Triggered when the account is underwater post-liquidation.
         if health_after.equity < 0 {
-            insurance_record_bad_debt(&env, &settlement_asset, -health_after.equity)?;
+            vault_absorb_bad_debt(&env, &user, &settlement_asset)?;
         }
 
         Ok(LiquidationReceipt {
@@ -256,11 +282,11 @@ fn insurance_pay_liquidator(
     )
 }
 
-fn insurance_record_bad_debt(env: &Env, asset: &Address, amount: i128) -> Result<i128, CoreError> {
+fn vault_absorb_bad_debt(env: &Env, user: &Address, asset: &Address) -> Result<i128, CoreError> {
     env.invoke_contract::<Result<i128, CoreError>>(
-        &insurance_address(env)?,
-        &Symbol::new(env, "record_bad_debt"),
-        vec![env, asset.into_val(env), amount.into_val(env)],
+        &vault_address(env)?,
+        &Symbol::new(env, "absorb_bad_debt"),
+        vec![env, user.into_val(env), asset.into_val(env)],
     )
 }
 
@@ -345,6 +371,8 @@ mod tests {
 
         vault.initialize(&admin, &oracle_id, &engine_id);
         vault.set_collateral(&settlement_asset, &Symbol::new(&env, "USDC"), &0, &true);
+        vault.set_insurance(&insurance_id);
+        vault.set_liquidation(&liquidation_id);
         engine.initialize(&admin, &oracle_id, &vault_id, &settlement_asset);
         engine.set_order_gateway(&admin);
         engine.set_liquidation(&liquidation_id);
@@ -365,6 +393,7 @@ mod tests {
             max_execution_deviation_bps: 100,
         });
         insurance.initialize(&admin, &liquidation_id);
+        insurance.set_vault(&vault_id);
         insurance.deposit(&admin, &settlement_asset, &(1_000 * PRECISION));
         liquidation.initialize(
             &admin,
@@ -455,5 +484,89 @@ mod tests {
         );
         assert!(s.insurance.balance_of(&s.settlement_asset) < 1_000 * PRECISION);
         assert!(s.vault.account_health(&s.user, &s.settlement_asset).equity < 1_000 * PRECISION);
+    }
+
+    // C1 solvency: when liquidation drives a balance negative, the vault must pull
+    // real tokens from the insurance fund and credit the account back toward zero.
+    #[test]
+    fn bad_debt_fully_covered_by_insurance_restores_zero_balance() {
+        let s = setup(); // insurance funded with 1_000 * PRECISION
+        let opened = s.engine.open_position(
+            &s.user,
+            &1,
+            &(20 * PRECISION),
+            &true,
+            &(100 * PRECISION),
+            &MarginMode::Cross,
+        );
+        s.env.ledger().with_mut(|l| l.timestamp += 1);
+        s.oracle.write_price(
+            &Symbol::new(&s.env, "BTC"),
+            &s.publisher,
+            &(10 * PRECISION),
+            &(PRECISION / 100),
+            &s.env.ledger().timestamp(),
+        );
+
+        // Full close: realized loss 20*(10-100) = -1800 → balance 1000-1800 = -800.
+        s.liquidation.liquidate(
+            &s.liquidator,
+            &s.user,
+            &opened.position_id,
+            &(20 * PRECISION),
+            &(10 * PRECISION),
+        );
+
+        // Insurance covered the 800 deficit in full: balance back to 0, no bad debt.
+        assert_eq!(s.vault.balance_of(&s.user, &s.settlement_asset), 0);
+        assert_eq!(s.insurance.bad_debt_of(&s.settlement_asset), 0);
+        // Fund paid the 1*PRECISION reward + 800 deficit out of 1_000.
+        assert_eq!(
+            s.insurance.balance_of(&s.settlement_asset),
+            1_000 * PRECISION - PRECISION - 800 * PRECISION
+        );
+    }
+
+    // C1 solvency: when the fund cannot fully cover, it is drained and the
+    // uncovered remainder is recorded as protocol bad debt.
+    #[test]
+    fn bad_debt_exceeding_fund_is_partially_covered_and_recorded() {
+        let s = setup(); // insurance funded with 1_000 * PRECISION
+        let opened = s.engine.open_position(
+            &s.user,
+            &1,
+            &(100 * PRECISION),
+            &true,
+            &(100 * PRECISION),
+            &MarginMode::Cross,
+        );
+        s.env.ledger().with_mut(|l| l.timestamp += 1);
+        s.oracle.write_price(
+            &Symbol::new(&s.env, "BTC"),
+            &s.publisher,
+            &(10 * PRECISION),
+            &(PRECISION / 100),
+            &s.env.ledger().timestamp(),
+        );
+
+        // Full close: realized -9000 → balance -8000. Reward 5 leaves fund at 995,
+        // which fully drains covering 995 of the 8000 deficit.
+        s.liquidation.liquidate(
+            &s.liquidator,
+            &s.user,
+            &opened.position_id,
+            &(100 * PRECISION),
+            &(10 * PRECISION),
+        );
+
+        assert_eq!(s.insurance.balance_of(&s.settlement_asset), 0);
+        assert_eq!(
+            s.insurance.bad_debt_of(&s.settlement_asset),
+            8_000 * PRECISION - 995 * PRECISION
+        );
+        assert_eq!(
+            s.vault.balance_of(&s.user, &s.settlement_asset),
+            -(8_000 * PRECISION) + 995 * PRECISION
+        );
     }
 }

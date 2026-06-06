@@ -1095,10 +1095,12 @@ dependencies = [
 name = "perp-order-gateway"
 version = "0.1.0"
 dependencies = [
+ "ed25519-dalek",
  "perp-engine",
  "perp-oracle-adapter",
  "perp-vault",
  "protocol-core",
+ "sha2",
  "soroban-sdk",
 ]
 

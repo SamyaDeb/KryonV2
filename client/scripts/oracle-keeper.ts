@@ -20,6 +20,9 @@ import {
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
 import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
+import { assertRequiredSecrets, assertNoPublicSecretLeak } from "../lib/secrets-check";
+assertRequiredSecrets(["DATABASE_URL", "ORACLE_PUBLISHER_SECRET"]);
+assertNoPublicSecretLeak();
 
 const PRICE_PRECISION = BigInt("1000000000000000000"); // 1e18
 const PUBLISH_INTERVAL_MS = 8_000; // every 8s — oracle guard max_age is 60s

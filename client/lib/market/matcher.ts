@@ -3,11 +3,13 @@
 import { OrderIntent, orderIntentToJson } from "./order-intent";
 import {
   cancelSigningMessage,
-  orderSigningMessage,
+  orderSettlementMessage,
+  pubkeyHexFromAddress,
   type SignedCancelPayload,
   type SignedOrderPayload,
 } from "./signing-message";
 import { freighterSignMessage } from "@/lib/stellar/freighter";
+import { NETWORK } from "@/config";
 
 // All order/market data flows through this app's own same-origin API routes
 // (app/api/**). Using relative paths means it works regardless of the dev/prod
@@ -22,9 +24,12 @@ export interface MatcherOrder {
 
 export async function submitOrder(intent: OrderIntent): Promise<{ ok: boolean; error?: string }> {
   try {
-    const signature = await freighterSignMessage(orderSigningMessage(intent), intent.owner);
+    const pubkeyHex = pubkeyHexFromAddress(intent.owner);
+    const jsonPayload = orderIntentToJson(intent) as Omit<SignedOrderPayload, "signature">;
+    const message = orderSettlementMessage(NETWORK.passphrase, pubkeyHex, jsonPayload);
+    const signature = await freighterSignMessage(message, intent.owner);
     const payload: SignedOrderPayload = {
-      ...(orderIntentToJson(intent) as Omit<SignedOrderPayload, "signature">),
+      ...jsonPayload,
       signature,
     };
     const res = await fetch(`/api/orders`, {

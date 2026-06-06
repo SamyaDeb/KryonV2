@@ -22,7 +22,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
                 },
                 {
-                  "u64": "60"
+                  "u64": "172800"
                 }
               ]
             }
@@ -184,7 +184,7 @@
                           ]
                         },
                         "val": {
-                          "u64": "60"
+                          "u64": "172800"
                         }
                       },
                       {

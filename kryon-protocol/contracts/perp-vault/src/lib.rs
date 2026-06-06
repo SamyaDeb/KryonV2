@@ -17,12 +17,16 @@ pub enum DataKey {
     PendingAdmin,
     Engine,
     Oracle,
+    Insurance,
+    Liquidation,
     Collateral(Address),
     Balance(Address, Address),
     Positions(Address),
     MarketConfig(u32),
     FundingLong(u32),
     FundingShort(u32),
+    UserAssets(Address),
+    Paused,
 }
 
 #[contract]
@@ -76,6 +80,49 @@ impl PerpVaultContract {
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::Engine, &engine);
         Ok(())
+    }
+
+    pub fn set_insurance(env: Env, insurance: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::Insurance, &insurance);
+        Ok(())
+    }
+
+    pub fn set_liquidation(env: Env, liquidation: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage()
+            .instance()
+            .set(&DataKey::Liquidation, &liquidation);
+        Ok(())
+    }
+
+    /// Absorb an underwater account's bad debt after liquidation. The vault pulls
+    /// real tokens from the insurance fund into reserves and credits the user back
+    /// toward zero. Any uncovered remainder is recorded as protocol bad debt.
+    /// Returns the amount covered. Idempotent for non-negative balances (returns 0).
+    /// Only the liquidation contract may call.
+    pub fn absorb_bad_debt(
+        env: Env,
+        user: Address,
+        asset: Address,
+    ) -> Result<i128, CoreError> {
+        require_liquidation(&env)?;
+        let balance = balance_of(env.clone(), user.clone(), asset.clone());
+        if balance >= 0 {
+            return Ok(0);
+        }
+        let deficit = checked_sub(0, balance)?;
+        let covered = insurance_cover_deficit(&env, &asset, deficit)?;
+        if covered > 0 {
+            increase_balance(&env, &user, &asset, covered)?;
+        }
+        let remaining = checked_sub(deficit, covered)?;
+        if remaining > 0 {
+            insurance_record_bad_debt(&env, &asset, remaining)?;
+        }
+        Ok(covered)
     }
 
     pub fn set_collateral(
@@ -150,6 +197,7 @@ impl PerpVaultContract {
         pnl: i128,
     ) -> Result<i128, CoreError> {
         require_engine(&env)?;
+        require_not_paused(&env)?;
         if pnl >= 0 {
             increase_balance(&env, &user, &asset, pnl)
         } else {
@@ -163,6 +211,7 @@ impl PerpVaultContract {
         asset: Address,
         amount: i128,
     ) -> Result<i128, CoreError> {
+        require_not_paused(&env)?;
         user.require_auth();
         if amount <= 0 {
             return Err(CoreError::InvalidAmount);
@@ -173,7 +222,9 @@ impl PerpVaultContract {
         }
         let vault = env.current_contract_address();
         token::Client::new(&env, &asset).transfer(&user, &vault, &amount);
-        increase_balance(&env, &user, &asset, amount)
+        let new_balance = increase_balance(&env, &user, &asset, amount)?;
+        record_user_asset(&env, &user, &asset);
+        Ok(new_balance)
     }
 
     pub fn withdraw(
@@ -182,6 +233,7 @@ impl PerpVaultContract {
         asset: Address,
         amount: i128,
     ) -> Result<AccountHealth, CoreError> {
+        require_not_paused(&env)?;
         user.require_auth();
         if amount <= 0 {
             return Err(CoreError::InvalidAmount);
@@ -196,14 +248,19 @@ impl PerpVaultContract {
         }
 
         let positions = load_positions(&env, &user);
-        let account = account_snapshot_for_asset(
-            &env,
-            user.clone(),
-            asset.clone(),
-            balance,
-            config,
-            positions,
-        )?;
+        let user_assets_key = DataKey::UserAssets(user.clone());
+        let account = if env.storage().persistent().has(&user_assets_key) {
+            account_snapshot_all_assets(&env, user.clone(), positions)?
+        } else {
+            account_snapshot_for_asset(
+                &env,
+                user.clone(),
+                asset.clone(),
+                balance,
+                config,
+                positions,
+            )?
+        };
         let markets = load_markets_for_positions(&env, &account.positions)?;
         let price = collateral_price(&env, &asset)?;
         let withdrawal_value = protocol_core::mul_precision(amount, price.price)?;
@@ -220,16 +277,42 @@ impl PerpVaultContract {
         user: Address,
         asset: Address,
     ) -> Result<AccountHealth, CoreError> {
-        let config = load_collateral(&env, &asset)?;
-        let balance = balance_of(env.clone(), user.clone(), asset.clone());
         let positions = load_positions(&env, &user);
-        let account = account_snapshot_for_asset(&env, user, asset, balance, config, positions)?;
+        let user_assets_key = DataKey::UserAssets(user.clone());
+        let account = if env.storage().persistent().has(&user_assets_key) {
+            account_snapshot_all_assets(&env, user, positions)?
+        } else {
+            let config = load_collateral(&env, &asset)?;
+            let balance = balance_of(env.clone(), user.clone(), asset.clone());
+            account_snapshot_for_asset(&env, user, asset, balance, config, positions)?
+        };
         let markets = load_markets_for_positions(&env, &account.positions)?;
         account_health(&env, &account, &markets)
     }
 
     pub fn balance_of(env: Env, user: Address, asset: Address) -> i128 {
         balance_of(env, user, asset)
+    }
+
+    // --- H4: Emergency pause ---
+
+    pub fn emergency_pause(env: Env) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Paused, &true);
+        Ok(())
+    }
+
+    pub fn unpause(env: Env) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().remove(&DataKey::Paused);
+        Ok(())
+    }
+
+    pub fn is_paused(env: Env) -> bool {
+        env.storage()
+            .instance()
+            .get::<DataKey, bool>(&DataKey::Paused)
+            .unwrap_or(false)
     }
 }
 
@@ -251,6 +334,51 @@ fn require_engine(env: &Env) -> Result<Address, CoreError> {
         .ok_or(CoreError::InvalidConfig)?;
     engine.require_auth();
     Ok(engine)
+}
+
+fn require_liquidation(env: &Env) -> Result<Address, CoreError> {
+    let liquidation: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Liquidation)
+        .ok_or(CoreError::InvalidConfig)?;
+    liquidation.require_auth();
+    Ok(liquidation)
+}
+
+fn insurance_address(env: &Env) -> Result<Address, CoreError> {
+    env.storage()
+        .instance()
+        .get(&DataKey::Insurance)
+        .ok_or(CoreError::InvalidConfig)
+}
+
+fn insurance_cover_deficit(env: &Env, asset: &Address, amount: i128) -> Result<i128, CoreError> {
+    env.invoke_contract::<Result<i128, CoreError>>(
+        &insurance_address(env)?,
+        &Symbol::new(env, "cover_deficit"),
+        vec![env, asset.into_val(env), amount.into_val(env)],
+    )
+}
+
+fn insurance_record_bad_debt(env: &Env, asset: &Address, amount: i128) -> Result<i128, CoreError> {
+    env.invoke_contract::<Result<i128, CoreError>>(
+        &insurance_address(env)?,
+        &Symbol::new(env, "record_bad_debt"),
+        vec![env, asset.into_val(env), amount.into_val(env)],
+    )
+}
+
+fn require_not_paused(env: &Env) -> Result<(), CoreError> {
+    if env
+        .storage()
+        .instance()
+        .get::<DataKey, bool>(&DataKey::Paused)
+        .unwrap_or(false)
+    {
+        return Err(CoreError::Unauthorized);
+    }
+    Ok(())
 }
 
 fn validate_market_config(config: &MarketConfig) -> Result<(), CoreError> {
@@ -364,6 +492,78 @@ fn account_snapshot_for_asset(
             haircut_bps: config.haircut_bps,
         }],
     );
+    for position in positions.iter() {
+        if position.owner != user {
+            return Err(CoreError::Unauthorized);
+        }
+    }
+    Ok(protocol_core::AccountSnapshot {
+        owner: user,
+        collateral,
+        positions,
+    })
+}
+
+// --- H6: Multi-collateral helpers ---
+
+fn record_user_asset(env: &Env, user: &Address, asset: &Address) {
+    let key = DataKey::UserAssets(user.clone());
+    let mut assets: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&key)
+        .unwrap_or_else(|| Vec::new(env));
+    for a in assets.iter() {
+        if a == *asset {
+            return;
+        }
+    }
+    assets.push_back(asset.clone());
+    env.storage().persistent().set(&key, &assets);
+}
+
+fn account_snapshot_all_assets(
+    env: &Env,
+    user: Address,
+    positions: Vec<Position>,
+) -> Result<protocol_core::AccountSnapshot, CoreError> {
+    let user_assets_key = DataKey::UserAssets(user.clone());
+    let user_assets: Vec<Address> = env
+        .storage()
+        .persistent()
+        .get(&user_assets_key)
+        .unwrap_or_else(|| Vec::new(env));
+
+    let mut collateral: Vec<CollateralBalance> = Vec::new(env);
+    for asset in user_assets.iter() {
+        let amount = balance_of(env.clone(), user.clone(), asset.clone());
+        // Zero balance contributes nothing — skip to avoid unnecessary oracle calls.
+        // Negative balances MUST be included: they represent underwater accounts
+        // that need the negative equity to trigger bad-debt coverage.
+        if amount == 0 {
+            continue;
+        }
+        let config = match env
+            .storage()
+            .persistent()
+            .get::<DataKey, CollateralConfig>(&DataKey::Collateral(asset.clone()))
+        {
+            Some(c) => c,
+            None => continue,
+        };
+        if !config.active {
+            continue;
+        }
+        let price = oracle_get_price(env, &oracle_address(env)?, &config.oracle_asset, None)?;
+        let value = protocol_core::mul_precision(amount, price.price)?;
+        collateral.push_back(CollateralBalance {
+            asset,
+            amount,
+            value,
+            haircut_bps: config.haircut_bps,
+        });
+    }
+
     for position in positions.iter() {
         if position.owner != user {
             return Err(CoreError::Unauthorized);
@@ -572,5 +772,129 @@ mod tests {
             Err(_) => true,
         });
         assert_eq!(vault.balance_of(&user, &settlement_asset), 0);
+    }
+
+    // --- H4 pause tests ---
+
+    #[test]
+    fn paused_vault_rejects_deposit() {
+        let env = Env::default();
+        let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
+        vault.emergency_pause();
+        assert!(vault.is_paused());
+        let result = vault.try_deposit(&user, &settlement_asset, &(100 * PRECISION));
+        assert!(match result {
+            Ok(inner) => inner.is_err(),
+            Err(_) => true,
+        });
+    }
+
+    #[test]
+    fn paused_vault_rejects_withdraw() {
+        let env = Env::default();
+        let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
+        // deposit before pause
+        vault.deposit(&user, &settlement_asset, &(100 * PRECISION));
+        vault.emergency_pause();
+        let result = vault.try_withdraw(&user, &settlement_asset, &(50 * PRECISION));
+        assert!(match result {
+            Ok(inner) => inner.is_err(),
+            Err(_) => true,
+        });
+    }
+
+    #[test]
+    fn unpause_restores_deposit() {
+        let env = Env::default();
+        let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
+        vault.emergency_pause();
+        assert!(vault.is_paused());
+        vault.unpause();
+        assert!(!vault.is_paused());
+        // deposit should succeed after unpause
+        assert_eq!(
+            vault.deposit(&user, &settlement_asset, &(100 * PRECISION)),
+            100 * PRECISION
+        );
+    }
+
+    // --- H6 multi-collateral test ---
+
+    #[test]
+    fn multi_collateral_health_includes_all_assets() {
+        let env = Env::default();
+        env.mock_all_auths();
+
+        let admin = Address::generate(&env);
+        let user = Address::generate(&env);
+        let engine = Address::generate(&env);
+        let publisher = Address::generate(&env);
+
+        // Create two separate token contracts: one for USDC, one for BTC
+        let usdc_admin = Address::generate(&env);
+        let btc_admin = Address::generate(&env);
+        let usdc_contract = env.register_stellar_asset_contract_v2(usdc_admin.clone());
+        let btc_contract = env.register_stellar_asset_contract_v2(btc_admin.clone());
+        let usdc_asset = usdc_contract.address();
+        let btc_asset = btc_contract.address();
+
+        // Mint tokens to user
+        token::StellarAssetClient::new(&env, &usdc_asset).mint(&user, &(1_000 * PRECISION));
+        token::StellarAssetClient::new(&env, &btc_asset).mint(&user, &(10 * PRECISION));
+
+        // Set up oracle with prices for USDC and BTC
+        let oracle_id = env.register(OracleAdapterContract, ());
+        let oracle = OracleAdapterContractClient::new(&env, &oracle_id);
+        oracle.initialize(&admin);
+        oracle.set_feed(
+            &Symbol::new(&env, "USDC"),
+            &publisher,
+            &OracleSource::Reflector,
+            &OracleGuard { max_age_secs: 60, max_confidence_bps: 100 },
+            &true,
+        );
+        oracle.set_feed(
+            &Symbol::new(&env, "BTC"),
+            &publisher,
+            &OracleSource::Reflector,
+            &OracleGuard { max_age_secs: 60, max_confidence_bps: 100 },
+            &true,
+        );
+        // USDC = $1, BTC = $10 (using PRECISION scale)
+        oracle.write_price(
+            &Symbol::new(&env, "USDC"),
+            &publisher,
+            &PRECISION,
+            &(PRECISION / 100),
+            &env.ledger().timestamp(),
+        );
+        oracle.write_price(
+            &Symbol::new(&env, "BTC"),
+            &publisher,
+            &(10 * PRECISION),
+            &(PRECISION / 100),
+            &env.ledger().timestamp(),
+        );
+
+        // Initialize vault with both collateral types
+        let vault_id = env.register(PerpVaultContract, ());
+        let vault = PerpVaultContractClient::new(&env, &vault_id);
+        vault.initialize(&admin, &oracle_id, &engine);
+        vault.set_collateral(&usdc_asset, &Symbol::new(&env, "USDC"), &0, &true);
+        vault.set_collateral(&btc_asset, &Symbol::new(&env, "BTC"), &0, &true);
+
+        // Deposit both assets
+        let usdc_deposit = 100 * PRECISION;
+        let btc_deposit = 2 * PRECISION;
+        vault.deposit(&user, &usdc_asset, &usdc_deposit);
+        vault.deposit(&user, &btc_asset, &btc_deposit);
+
+        // account_health called with USDC address should include BTC value too
+        let health = vault.account_health(&user, &usdc_asset);
+
+        // USDC value: 100 * PRECISION * PRECISION / PRECISION = 100 * PRECISION
+        // BTC value:   2 * PRECISION * 10 * PRECISION / PRECISION = 20 * PRECISION
+        // Total equity (no positions) = 120 * PRECISION
+        assert_eq!(health.equity, 120 * PRECISION);
     }
 }
