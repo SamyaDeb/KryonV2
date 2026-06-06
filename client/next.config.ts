@@ -23,6 +23,25 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
+  // The Docusaurus docs site is built into public/docs as a static export and
+  // served from this same deployment under /docs. Next doesn't resolve a folder
+  // request to its index.html, so map clean /docs URLs onto the static files.
+  // `afterFiles` means real assets (js/css/img under /docs) are served directly;
+  // only bare route paths fall through to these rewrites.
+  async rewrites() {
+    return {
+      beforeFiles: [],
+      afterFiles: [
+        // Docusaurus (trailingSlash:false) emits flat .html files, e.g.
+        // /docs/architecture/protocol.html. Real assets (js/css/img) exist on
+        // disk and are served before these afterFiles rewrites kick in.
+        { source: "/docs", destination: "/docs/index.html" },
+        { source: "/docs/:path+", destination: "/docs/:path+.html" },
+      ],
+      fallback: [],
+    };
+  },
+
   async headers() {
     return [
       {

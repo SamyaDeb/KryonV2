@@ -20,6 +20,9 @@
 # production
 /build
 
+# docs site — generated from ../docs (Docusaurus) into public/docs at build time
+/public/docs
+
 # misc
 .DS_Store
 *.pem

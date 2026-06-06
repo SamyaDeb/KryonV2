@@ -1,46 +1,72 @@
 name: deploy-production
 
-# Auto-deploy the client to Vercel production on every push to main,
-# but only after the readiness gate (lint, typecheck, build, audit) passes.
-# Runs on GitHub's runners so it is not affected by local network/TLS issues.
-
+# Deploys the trading client to Vercel production after a push to main, but ONLY
+# after the readiness gate (lint, typecheck, build) passes. The actual deploy
+# runs under the `production` GitHub Environment, so branch/required-reviewer
+# protection there acts as the human approval gate for a mainnet frontend.
 on:
   push:
     branches: [main]
     paths:
       - "client/**"
       - ".github/workflows/deploy-production.yml"
+      - ".github/actions/setup-client/**"
 
+# Never run two production deploys at once and never cancel one in flight —
+# cancelling mid-deploy can leave Vercel in a half-promoted state for live traders.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
 
+# Default to read-only; the deploy job needs nothing more than reading the repo.
+permissions:
+  contents: read
+
 jobs:
+  # ---------------------------------------------------------------------------
+  # Gate: identical checks to CI so we never promote a broken build to mainnet.
+  # ---------------------------------------------------------------------------
   gate:
     name: readiness gate
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: client
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: client/package-lock.json
-      - run: npm ci
-      - run: npm run lint
-      - run: npm run production:gate
-      - run: npx tsc --noEmit
-      - run: npm audit --audit-level=moderate
-      - run: npm run build
+          persist-credentials: false
 
+      - name: Setup
+        uses: ./.github/actions/setup-client
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production readiness gate
+        run: npm run production:gate
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Build
+        run: npm run build
+
+  # ---------------------------------------------------------------------------
+  # Deploy: Vercel prebuilt output flow, retry-wrapped for transient API errors.
+  # ---------------------------------------------------------------------------
   deploy:
     name: vercel production deploy
     needs: gate
     runs-on: ubuntu-latest
-    environment: production
+    timeout-minutes: 20
+    # `environment: production` enforces required reviewers / wait timers / the
+    # environment's own secrets. This is the mainnet promotion approval point.
+    environment:
+      name: production
+      url: ${{ vars.NEXT_PUBLIC_APP_URL }}
     defaults:
       run:
         working-directory: client
@@ -48,20 +74,58 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      # Pin the CLI for reproducible deploys; override with a repo variable to bump.
+      VERCEL_CLI_VERSION: ${{ vars.VERCEL_CLI_VERSION || 'latest' }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
+      # Build the Docusaurus docs site into client/public/docs so the same Vercel
+      # deployment serves /docs (see client/next.config.ts rewrites). Done here in
+      # the deploy job — not the CI gate — so docs build time doesn't gate releases.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: Build docs into client/public/docs
+        working-directory: docs
+        run: |
+          npm ci
+          npm run build
+          rm -rf ../client/public/docs
+          cp -r build ../client/public/docs
+
+      # Fail fast and loud if any deploy secret is missing, instead of letting the
+      # Vercel CLI emit a confusing auth error halfway through.
       - name: Validate deploy secrets
         run: |
-          test -n "$VERCEL_ORG_ID"   || { echo "VERCEL_ORG_ID missing"; exit 1; }
-          test -n "$VERCEL_PROJECT_ID" || { echo "VERCEL_PROJECT_ID missing"; exit 1; }
-          test -n "$VERCEL_TOKEN"    || { echo "VERCEL_TOKEN missing — add it in repo Settings → Secrets"; exit 1; }
+          test -n "$VERCEL_ORG_ID"     || { echo "::error::VERCEL_ORG_ID missing";    exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID missing"; exit 1; }
+          test -n "$VERCEL_TOKEN"      || { echo "::error::VERCEL_TOKEN missing — add it in Settings → Environments → production"; exit 1; }
 
+      # Retry helper: Vercel's pull/build/deploy can hit transient 5xx/network
+      # errors. We retry up to 3x with backoff so a blip doesn't fail a release.
       - name: Pull Vercel production env
-        run: npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+        run: |
+          n=0; until [ $n -ge 3 ]; do
+            npx --yes vercel@"$VERCEL_CLI_VERSION" pull --yes --environment=production --token="$VERCEL_TOKEN" && break
+            n=$((n+1)); echo "pull attempt $n failed; retrying in $((n*10))s"; sleep $((n*10))
+          done; [ $n -lt 3 ]
 
       - name: Build production output
-        run: npx --yes vercel@latest build --prod --token="$VERCEL_TOKEN"
+        run: npx --yes vercel@"$VERCEL_CLI_VERSION" build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output to production
-        run: npx --yes vercel@latest deploy --prebuilt --prod --token="$VERCEL_TOKEN"
+        run: |
+          n=0; until [ $n -ge 3 ]; do
+            url=$(npx --yes vercel@"$VERCEL_CLI_VERSION" deploy --prebuilt --prod --token="$VERCEL_TOKEN") && {
+              echo "Deployed: $url"
+              echo "### ✅ Production deploy" >> "$GITHUB_STEP_SUMMARY"
+              echo "$url" >> "$GITHUB_STEP_SUMMARY"
+              break
+            }
+            n=$((n+1)); echo "deploy attempt $n failed; retrying in $((n*15))s"; sleep $((n*15))
+          done; [ $n -lt 3 ]

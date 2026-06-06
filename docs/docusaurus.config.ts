@@ -7,8 +7,12 @@ const config: Config = {
   tagline: "Decentralised perpetual futures on Stellar / Soroban",
   favicon: "img/favicon.svg",
 
-  url: "https://docs.kryon.xyz",
-  baseUrl: "/",
+  // Served from the same deployment as the trading client, under /docs.
+  url: "https://client-eight-mu-71.vercel.app",
+  baseUrl: "/docs/",
+  // Emit non-trailing-slash routes so they line up with Next's default
+  // trailing-slash handling + the /docs rewrites in client/next.config.ts.
+  trailingSlash: false,
   organizationName: "kryon",
   projectName: "kryon-protocol",
 

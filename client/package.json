@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "docs:build": "npm --prefix ../docs run build && rm -rf public/docs && cp -r ../docs/build public/docs",
     "lint": "eslint",
     "dev:oracle": "tsx --env-file=.env.local scripts/oracle-keeper.ts",
     "dev:indexer": "tsx --env-file=.env.local scripts/state-indexer.ts",

@@ -9,15 +9,14 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
-// Docs is a separate Docusaurus app (see /docs). Point at it via env so the
-// link works locally (e.g. http://localhost:3002) and in prod (docs.kryon.xyz).
-const DOCS_URL = process.env.NEXT_PUBLIC_DOCS_URL ?? 'https://docs.kryon.xyz';
-
 const LANDING_NAV = [
   { to: '/trade/XLM-PERP', label: 'Trade' },
   { to: '/portfolio', label: 'Portfolio' },
   { to: '/leaderboard', label: 'Leaderboard' },
-  { to: DOCS_URL, label: 'Docs', external: true },
+  // Docs is a static Docusaurus build served from this same deployment at /docs.
+  // Use a plain anchor (hardNav) so it does a real navigation to the static site
+  // instead of client-side routing — there is no /docs route in the Next app.
+  { to: '/docs', label: 'Docs', hardNav: true },
 ];
 
 const SYSTEM_STATUS = [
@@ -419,15 +418,8 @@ export function LandingPage() {
               <div className="s5-menu-panel" onClick={e => e.stopPropagation()}>
                 <button className="s5-menu-close" onClick={() => setMenuOpen(false)}>✕</button>
                 {LANDING_NAV.map(n => (
-                  n.external ? (
-                    <a
-                      key={n.to}
-                      href={n.to}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="s5-menu-nav-link"
-                      onClick={() => setMenuOpen(false)}
-                    >
+                  n.hardNav ? (
+                    <a key={n.to} href={n.to} className="s5-menu-nav-link" onClick={() => setMenuOpen(false)}>
                       {n.label}
                     </a>
                   ) : (
