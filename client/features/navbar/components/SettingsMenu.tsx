@@ -35,7 +35,7 @@ export function SettingsMenu() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[262px] rounded-[12px] border border-[#2A2A31] bg-[#212128] shadow-[0_20px_40px_rgba(0,0,0,.6)] z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[262px] max-w-[calc(100vw-24px)] rounded-[12px] border border-[#2A2A31] bg-[#212128] shadow-[0_20px_40px_rgba(0,0,0,.6)] z-50 overflow-hidden">
           <div className="py-1">
             {ROWS.map((row) => (
               <button

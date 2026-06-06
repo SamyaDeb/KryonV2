@@ -112,10 +112,10 @@ export default function PortfolioPage() {
   return (
     <div className="min-h-screen bg-[#19191A] text-[#f5f5f5]" style={{ fontFamily: "var(--font-poppins), 'Poppins', system-ui, sans-serif" }}>
       <TopNav />
-      <main className="px-6 py-6 max-w-[1200px] mx-auto">
+      <main className="mx-auto max-w-[1200px] px-4 py-5 sm:px-6 sm:py-6">
         {/* Header */}
-        <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
-          <h1 className="text-[34px] font-bold tracking-tight">Portfolio</h1>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <h1 className="text-[26px] font-bold tracking-tight sm:text-[34px]">Portfolio</h1>
           <div className="flex flex-wrap items-center gap-2">
             <DepositWithdrawDialog triggerLabel="Withdraw" defaultTab="withdraw" triggerClassName={actionPill} />
             <DepositWithdrawDialog

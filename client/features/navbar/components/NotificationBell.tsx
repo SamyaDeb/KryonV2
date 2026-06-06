@@ -46,7 +46,7 @@ export function NotificationBell() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-[340px] rounded-[12px] border border-[#2A2A31] bg-[#212128] shadow-[0_20px_40px_rgba(0,0,0,.6)] z-50 overflow-hidden">
+        <div className="absolute right-0 top-full mt-2 w-[340px] max-w-[calc(100vw-24px)] rounded-[12px] border border-[#2A2A31] bg-[#212128] shadow-[0_20px_40px_rgba(0,0,0,.6)] z-50 overflow-hidden">
           <div className="flex items-center justify-between border-b border-[#2A2A31] px-4 py-3">
             <span className="text-[13px] font-semibold text-[#f5f5f5]">Notifications</span>
             {unread > 0 && (

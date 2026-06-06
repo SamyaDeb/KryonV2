@@ -96,7 +96,7 @@ export function SettlementModal() {
   if (!fills.length && !pending.length) return null;
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col gap-2 w-[320px]">
+    <div className="fixed inset-x-3 bottom-24 z-50 flex flex-col gap-2 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:w-[320px]">
       {pending.slice(0, 2).map((settlement) => (
         <PendingSettlementCard
           key={settlement.id}

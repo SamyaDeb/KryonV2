@@ -6,7 +6,6 @@ import { useRouter } from 'next/navigation';
 import { useWalletStore } from '@/stores/wallet';
 import { freighterConnect, freighterIsInstalled } from '@/lib/stellar/freighter';
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
 
 const LANDING_NAV = [
@@ -20,36 +19,34 @@ const LANDING_NAV = [
 ];
 
 const SYSTEM_STATUS = [
-  '01. GPS', '02. Radar', '03. Engines', '04. Electrical', '05. Fuel',
-  '06. Electronic Warfare', '07. Countermeasures', '08. Environmental',
-  '09. Communications', '10. Flight Data Links',
+  '01. Oracle Feed', '02. CLOB Matcher', '03. Margin Engine', '04. Vault', '05. Order Gateway',
+  '06. Liquidation', '07. Insurance Fund', '08. Risk Engine',
+  '09. Funding', '10. State Indexer',
 ];
 
 const HEADLINES = [
-  { title: 'Kryon Recognized as One of Fast Company Most Innovative Companies of 2026', desc: 'Named for Defense Tech, joining leaders like Saronic, Anduril, and Forterra on the list.' },
-  { title: 'Kryon Launches Advanced RF-Enabled GPS Threat Detection', desc: 'Next-generation capability delivers early warning of GPS threats up to 200 nautical miles away with plug-and-play deployment' },
-  { title: 'Kryon Named North American Technology Innovation Leader in Onboard OT Platforms', desc: "Analyst firm recognizes Kryon's leadership in transforming hidden operational data into actionable insights." },
+  { title: 'XLM-PERP Now Live on Stellar Testnet', desc: 'USDC-settled perpetual futures with on-chain margin and settlement — trade self-custodial straight from your Freighter wallet.' },
+  { title: 'Kryon Brings RWA Perpetuals to Stellar', desc: 'A decentralized exchange pairing an off-chain central-limit order book with a fully on-chain margin and settlement engine on Soroban.' },
+  { title: 'Sub-Second Fills, On-Chain Truth', desc: 'Price-time matching off-chain for a familiar low-latency perp experience, with custody, margin, and settlement enforced on-chain.' },
 ];
 
 const SOLUTIONS = [
-  { title: 'Cyber / EW', desc: 'Analyze serial bus traffic and radio frequency (RF) data to flag threats in near real-time, empowering operators to take decisive action and avoid mission compromise.' },
-  { title: 'Predictive Maintenance', desc: 'Transform serial bus data into proactive maintenance insights to keep operators safe and fleets mission-ready.' },
-  { title: 'Fleet Compliance', desc: 'Process security log files from commercial aircraft to rapidly identify security incidents and verify compliance with aviation regulations.', accent: true },
-  { title: 'Research', desc: 'Secure your most critical assets against advanced persistent threats through expert-led security assessments, novel research, and specialized tooling.' },
+  { title: 'RWA Perpetuals', desc: 'Trade perpetual futures on tokenized real-world assets and crypto, USDC-settled, with leverage and transparent funding.' },
+  { title: 'On-Chain Settlement', desc: 'Collateral, margin, and settlement live on Soroban. You keep your keys — every fill settles to a contract you control.' },
+  { title: 'CLOB Matching', desc: 'An off-chain central-limit order book matches orders price-time for low-latency fills, while on-chain state stays the source of truth.', accent: true },
+  { title: 'Risk & Liquidation', desc: 'A transparent margin engine, funding mechanism, and insurance-backed liquidation keep markets solvent and fair.' },
 ];
 
 const INSIGHTS = [
-  { title: 'Kryon and Raglan Partner to Deliver Next-Generation Security for Military and Government Vehicles', date: 'May 14, 2026', desc: 'Partnership combines software-defined vehicle architecture with operational technology monitoring to modernize vehicle fleets', featured: true },
-  { title: 'Tom Mealey, From Player to Coach', date: 'May 12, 2026', desc: 'Inside Kryon: Employee Spotlight' },
-  { title: "Kryon Partners with Anduril on Army's Next Generation Command and Control Initiative", date: 'February 23, 2026', desc: 'Operational Intelligence Platform Integrates with Lattice Mesh to Deliver Near Real-Time Vehicle Health Data for Enhanced Mission Readiness' },
-  { title: 'Kryon Appoints L3Harris Executive Toby Magsig as President and Interim CEO', date: 'January 26, 2026', desc: 'Company Co-Founder Josh Lospinoso Remains Involved as Founder and Board Member' },
-  { title: 'Near-Real-Time Data Powers Faster Fault and Threat Detection', date: 'January 21, 2026', desc: 'Boeing and Kryon join forces to detect faults and intrusions at mission speed.' },
-  { title: "Delivering Early-Warning for GPS Spoofing with Kryon's RF-Enabled Threat Detection", date: 'January 16, 2026', desc: 'Kryon built an RF-based detection method to rapidly identify early warning indicators of GPS spoofing.' },
-  { title: 'Kryon Launches Advanced RF-Enabled GPS Threat Detection', date: 'January 7, 2026', desc: 'Next-generation capability delivers early warning of GPS threats up to 200 nautical miles away with plug-and-play deployment' },
-  { title: 'Kryon Named North American Technology Innovation Leader', date: 'December 23, 2025', desc: "Analyst firm recognizes Kryon's leadership in transforming hidden operational data into actionable insights." },
-  { title: 'Kryon Expands Operations to Support Indo-Pacific Fleet Readiness', date: 'November 18, 2025', desc: 'New regional presence enables faster deployment cycles and on-site integration support for allied naval forces.' },
-  { title: "Kryon's OT Platform Achieves FedRAMP Authorization", date: 'October 30, 2025', desc: 'Authorization accelerates adoption across federal agencies and defense contractors requiring certified cloud security.' },
-  { title: 'Kryon and Lockheed Martin Sign Multi-Year Integration Agreement', date: 'September 9, 2025', desc: 'Partnership extends real-time operational intelligence to next-generation F-35 sustainment programs.' },
+  { title: 'XLM-PERP Goes Live — USDC-Settled Perpetuals on Stellar', date: 'May 28, 2026', desc: 'Protocol Launch', featured: true },
+  { title: 'On-Chain Margin & Settlement, Off-Chain Speed', date: 'May 20, 2026', desc: 'How Kryon pairs a price-time CLOB matcher with a Soroban settlement engine.' },
+  { title: 'Self-Custodial Trading with Freighter', date: 'May 6, 2026', desc: 'Sign orders from your own wallet — your keys, your collateral, every fill.' },
+  { title: 'Understanding Funding & Mark Price on Kryon', date: 'April 24, 2026', desc: 'How the funding mechanism anchors perp prices to the oracle.' },
+  { title: 'Inside the Liquidation & Insurance Engine', date: 'April 11, 2026', desc: 'Transparent margin checks and an insurance fund that keeps markets solvent.' },
+  { title: 'The Road to RWA Perpetuals', date: 'March 30, 2026', desc: 'Bringing tokenized real-world assets to perpetual futures on Stellar.' },
+  { title: 'Oracle Design: Pricing Perps on Soroban', date: 'March 18, 2026', desc: 'How the oracle adapter publishes the prices the engine settles against.' },
+  { title: 'Leaderboard & Portfolio Analytics', date: 'March 5, 2026', desc: 'Track PnL, open interest, and ranking across every market in real time.' },
+  { title: 'Kryon Stress-Test Report: Production Hardening', date: 'February 20, 2026', desc: 'Findings and fixes from load-testing the matcher, indexer, and settlement path.' },
 ];
 
 function LoadingOverlay() {
@@ -126,6 +123,15 @@ function genBinaryBlock(): string {
   const g = () => Array.from({ length: 8 }, () => Math.round(Math.random())).join('');
   return `${g()}  ${g()}  ${g()}`;
 }
+
+// Deterministic seeds for SSR — random values are filled in on mount so the
+// server-rendered HTML matches the client's first render (no hydration mismatch).
+const b8 = (n: number) => (n & 0xff).toString(2).padStart(8, '0');
+const INITIAL_BINARY: string[] = Array.from({ length: 9 }, (_, i) =>
+  `${b8(i * 53 + 11)}  ${b8(i * 97 + 7)}  ${b8(i * 29 + 131)}`,
+);
+const INITIAL_GRAPH_H = 0.5;
+const INITIAL_GRAPH_POINTS: number[] = [12, 28, 18, 33, 9, 24, 30];
 
 function SplitChars({ text, className, delay = 0 }: { text: string; className?: string; delay?: number }) {
   return (
@@ -214,10 +220,10 @@ export function LandingPage() {
   const { connected, connecting, setConnecting, setAddress, setConnected, setWrongNetwork } = useWalletStore();
 
   const [activeStatus, setActiveStatus] = useState(0);
-  const [binaryRows, setBinaryRows] = useState<string[]>(() => Array.from({ length: 9 }, genBinaryBlock));
+  const [binaryRows, setBinaryRows] = useState<string[]>(INITIAL_BINARY);
   const [menuOpen, setMenuOpen] = useState(false);
-  const [graphH, setGraphH] = useState(() => 0.25 + Math.random() * 0.65);
-  const [graphPoints, setGraphPoints] = useState<number[]>(() => Array.from({ length: 7 }, () => 5 + Math.random() * 35));
+  const [graphH, setGraphH] = useState(INITIAL_GRAPH_H);
+  const [graphPoints, setGraphPoints] = useState<number[]>(INITIAL_GRAPH_POINTS);
   const [cardIdx, setCardIdx] = useState(CAROUSEL_CLONES);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [ftEmail, setFtEmail] = useState('');
@@ -225,10 +231,6 @@ export function LandingPage() {
   const dragStartX = useRef<number | null>(null);
   const [scrollProgress, setScrollProgress] = useState(0);
   const [scrollY, setScrollY] = useState(0);
-  const [mounted, setMounted] = useState(false);
-
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { setMounted(true); }, []);
 
   useEffect(() => {
     const onScroll = () => {
@@ -259,11 +261,13 @@ export function LandingPage() {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    const randomize = () => {
       setBinaryRows(Array.from({ length: 9 }, genBinaryBlock));
       setGraphH(0.25 + Math.random() * 0.65);
       setGraphPoints(Array.from({ length: 7 }, () => 5 + Math.random() * 35));
-    }, 2200);
+    };
+    randomize(); // fill in random values after mount (client-only)
+    const t = setInterval(randomize, 2200);
     return () => clearInterval(t);
   }, []);
 
@@ -377,25 +381,6 @@ export function LandingPage() {
   return (
     <>
       <LoadingOverlay />
-      {mounted && createPortal(
-        <Link
-          href="/"
-          className="s5-nav-logo-link"
-          style={{
-            position: 'fixed',
-            top: '1.6rem',
-            left: '2.5rem',
-            zIndex: 9999,
-            opacity: logoOpacity,
-            pointerEvents: logoOpacity < 0.05 ? 'none' : 'auto',
-            transition: 'opacity 0.1s linear',
-          }}
-        >
-          <img src="/logo.png" alt="Kryon" className="s5-nav-logo-img" />
-          <span className="s5-nav-logo-text">KRYON</span>
-        </Link>,
-        document.body
-      )}
 
       <div id="s5-page-root" className="s5-page">
 
@@ -404,7 +389,18 @@ export function LandingPage() {
         </div>
 
         <header className="s5-fixed-nav">
-          <span />
+          <Link
+            href="/"
+            className="s5-nav-logo-link"
+            style={{
+              opacity: logoOpacity,
+              pointerEvents: logoOpacity < 0.05 ? 'none' : 'auto',
+              transition: 'opacity 0.1s linear',
+            }}
+          >
+            <img src="/logo.png" alt="Kryon" className="s5-nav-logo-img" />
+            <span className="s5-nav-logo-text">KRYON</span>
+          </Link>
           <button className="s5-menu-pill" onClick={() => setMenuOpen(m => !m)}>
             <svg viewBox="0 0 20 10" fill="none" width="20" height="10" aria-hidden="true">
               <line x1="0" y1="1.5" x2="20" y2="1.5" stroke="currentColor" strokeWidth="1.5" />
@@ -428,7 +424,6 @@ export function LandingPage() {
                     </Link>
                   )
                 ))}
-                <div className="s5-menu-divider" />
                 <button
                   onClick={() => { void handleConnect(); setMenuOpen(false); }}
                   disabled={connecting}
@@ -443,15 +438,15 @@ export function LandingPage() {
 
         <div className="s5-main-grid">
           <div className="s5-left-col">
-            <div className="s5-hero-left" style={{ paddingTop: 'calc(6.5rem + 60px)', height: 'calc(100vh - 140px)', minHeight: 'unset' }}>
-              <div className="s5-hero-title-wrap" style={{ transform: 'translateY(-47px)' }}>
-                <div className="s5-op-row" style={{ paddingTop: '60px', transform: 'translateY(-20px)' }}>
+            <div className="s5-hero-left">
+              <div className="s5-hero-title-wrap">
+                <div className="s5-op-row">
                   <div className="s5-op-slash-group">
                     <div className="s5-hero-intel"><SplitChars text="Perps" delay={0.05} /></div>
-                    <img src="/images/bb.png" alt="" className="s5-hero-slash-img" />
+                    <img src="/images/dd.png" alt="" className="s5-hero-slash-img" />
                   </div>
                 </div>
-                <div className="s5-hero-intel" style={{ transform: 'translateY(30px)' }}>
+                <div className="s5-hero-intel s5-hero-intel--btm">
                   <SplitChars text="Reimagined." delay={0.18} />
                 </div>
               </div>
@@ -533,8 +528,8 @@ export function LandingPage() {
         <section className="s5-solutions">
           <div className="s5-solutions-header s5-reveal" ref={solHeaderRef}>
             <div>
-              <h2 className="s5-solutions-title">Operational</h2>
-              <h2 className="s5-solutions-title">Intelligence Solutions</h2>
+              <h2 className="s5-solutions-title">Engineered</h2>
+              <h2 className="s5-solutions-title">for RWA Perps</h2>
             </div>
             <div className="s5-solutions-arrows">
               <button className="s5-arrow-btn" onClick={goPrev} aria-label="Previous">
@@ -554,7 +549,7 @@ export function LandingPage() {
             <div
               className="s5-solutions-track"
               style={{
-                transform: `translateX(calc(-${cardIdx} * 33.333vw))`,
+                transform: `translateX(calc(-${cardIdx} * var(--s5-card-step, 33.333vw)))`,
                 transition: isTransitioning ? 'transform 0.55s cubic-bezier(0.22,1,0.36,1)' : 'none',
               }}
               onTransitionEnd={handleCarouselTransitionEnd}
@@ -654,12 +649,12 @@ export function LandingPage() {
                 </ul>
               </div>
               <div>
-                <h3 className="s5-footer-col-h">Solutions<sup>4</sup></h3>
+                <h3 className="s5-footer-col-h">Features<sup>4</sup></h3>
                 <ul className="s5-footer-col-list">
-                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Cyber∕EW</a></li>
-                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Predictive Maintenance</a></li>
-                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Compliance</a></li>
-                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Research</a></li>
+                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">RWA Perpetuals</a></li>
+                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">On-Chain Settlement</a></li>
+                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">CLOB Matching</a></li>
+                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Risk & Liquidation</a></li>
                 </ul>
               </div>
               <div>

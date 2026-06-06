@@ -34,12 +34,20 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#19191A",
+  width: "device-width",
+  initialScale: 1,
+  // Allow pinch-zoom for accessibility; iOS input auto-zoom is prevented via a
+  // 16px min font-size on inputs in globals.css instead of locking the scale.
+  maximumScale: 5,
+  // Extend the canvas under the iOS notch / home indicator; pair with safe-area
+  // padding utilities (.pt-safe / .pb-safe) so content stays clear of insets.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" className={`${poppins.variable} ${geistMono.variable} dark h-full`}>
-      <body className="h-full bg-[#19191A] text-[#f5f5f5] antialiased">
+      <body className="min-h-dvh bg-[#19191A] text-[#f5f5f5] antialiased">
         <Providers>{children}</Providers>
       </body>
     </html>

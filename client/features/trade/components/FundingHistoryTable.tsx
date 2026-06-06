@@ -38,7 +38,8 @@ export function FundingHistoryTable({ marketFilter }: { marketFilter: number | "
   const cols = ["Time", "Market", "Payment", "Tx"];
 
   return (
-    <table className="w-full text-[12px] tabular">
+    <div className="overflow-x-auto no-scrollbar">
+    <table className="w-full min-w-[460px] text-[12px] tabular">
       <thead>
         <tr className="text-[10px] text-[#737373] font-semibold uppercase tracking-wider">
           {cols.map((h, i) => (
@@ -96,6 +97,7 @@ export function FundingHistoryTable({ marketFilter }: { marketFilter: number | "
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 

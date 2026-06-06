@@ -81,13 +81,13 @@ export default function LeaderboardPage() {
   return (
     <div className="min-h-screen bg-[#19191A] text-[#f5f5f5]" style={{ fontFamily: "var(--font-poppins), 'Poppins', system-ui, sans-serif" }}>
       <TopNav />
-      <main className="px-6 py-6 max-w-[1200px] mx-auto">
-        <h1 className="text-[34px] font-bold tracking-tight mb-5">Leaderboard</h1>
+      <main className="px-4 py-5 sm:px-6 sm:py-6 max-w-[1200px] mx-auto">
+        <h1 className="text-[26px] sm:text-[34px] font-bold tracking-tight mb-5">Leaderboard</h1>
 
         <div className="rounded-xl border border-[#2A2A31] bg-[#212128] overflow-hidden">
           {/* Controls */}
-          <div className="flex items-center justify-between gap-4 p-4 border-b border-[#2A2A31]">
-            <div className="relative flex-1 max-w-[520px]">
+          <div className="flex flex-wrap items-center justify-between gap-3 p-4 border-b border-[#2A2A31]">
+            <div className="relative flex-1 min-w-[180px] max-w-[520px]">
               <svg
                 width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-[#737373]"
@@ -102,7 +102,7 @@ export default function LeaderboardPage() {
                 className="w-full rounded-[8px] border border-[#2A2A31] bg-[#19191A] pl-9 pr-3 py-[10px] text-[13px] text-[#f5f5f5] placeholder:text-[#737373] outline-none focus:border-[#475569]"
               />
             </div>
-            <div className="relative">
+            <div className="relative shrink-0">
               <button
                 onClick={() => setPeriodOpen((o) => !o)}
                 className="flex items-center gap-2 rounded-[8px] border border-[#2A2A31] bg-[#19191A] px-3 py-[10px] text-[12.5px] text-[#f5f5f5] hover:border-[#475569] transition-colors"
@@ -126,7 +126,7 @@ export default function LeaderboardPage() {
           </div>
 
           {/* Header row */}
-          <div className="grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-3 text-[12px] text-[#a3a3a3] border-b border-[#2A2A31]">
+          <div className="hidden md:grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-3 text-[12px] text-[#a3a3a3] border-b border-[#2A2A31]">
             {COLS.map((c, i) => (
               <span key={c} className={i >= 2 ? "text-right" : ""}>{c}</span>
             ))}
@@ -152,25 +152,53 @@ export default function LeaderboardPage() {
               <span className="text-[12px] text-[#737373]">Trade activity feeds the board as fills settle.</span>
             </div>
           ) : (
-            traders.map((t) => (
-              <div
-                key={t.address}
-                className="grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-[14px] text-[13px] border-b border-[#2A2A31] hover:bg-white/[0.02] transition-colors items-center"
-              >
-                <span>
-                  <RankBadge rank={t.rank} />
-                </span>
-                <span className="font-mono text-[#f5f5f5]">{shortenAddress(t.address)}</span>
-                <span className="text-right text-[#f5f5f5]">{fmtUsd(t.accountValue)}</span>
-                <span className={`text-right font-semibold ${t.pnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"}`}>
-                  {t.pnl >= 0 ? "+" : ""}{fmtUsd(t.pnl)}
-                </span>
-                <span className={`text-right ${t.roi >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]"}`}>
-                  {(t.roi * 100).toFixed(2)}%
-                </span>
-                <span className="text-right text-[#f5f5f5]">{fmtUsd(t.volume)}</span>
-              </div>
-            ))
+            traders.map((t) => {
+              const pnlColor = t.pnl >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]";
+              const roiColor = t.roi >= 0 ? "text-[#1fae5b]" : "text-[#e34c4c]";
+              const pnlText = `${t.pnl >= 0 ? "+" : ""}${fmtUsd(t.pnl)}`;
+              const roiText = `${(t.roi * 100).toFixed(2)}%`;
+              return (
+                <div key={t.address} className="border-b border-[#2A2A31]">
+                  {/* Desktop row */}
+                  <div className="hidden md:grid grid-cols-[60px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)] px-4 py-[14px] text-[13px] hover:bg-white/[0.02] transition-colors items-center">
+                    <span>
+                      <RankBadge rank={t.rank} />
+                    </span>
+                    <span className="font-mono text-[#f5f5f5]">{shortenAddress(t.address)}</span>
+                    <span className="text-right text-[#f5f5f5]">{fmtUsd(t.accountValue)}</span>
+                    <span className={`text-right font-semibold ${pnlColor}`}>{pnlText}</span>
+                    <span className={`text-right ${roiColor}`}>{roiText}</span>
+                    <span className="text-right text-[#f5f5f5]">{fmtUsd(t.volume)}</span>
+                  </div>
+
+                  {/* Mobile card */}
+                  <div className="md:hidden p-4 hover:bg-white/[0.02] transition-colors">
+                    <div className="flex items-center gap-2 mb-3">
+                      <RankBadge rank={t.rank} />
+                      <span className="font-mono text-[13px] text-[#f5f5f5]">{shortenAddress(t.address)}</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-3 text-[13px]">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-[#a3a3a3]">Account Value</span>
+                        <span className="text-[#f5f5f5]">{fmtUsd(t.accountValue)}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-[#a3a3a3]">PNL ({label})</span>
+                        <span className={`font-semibold ${pnlColor}`}>{pnlText}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-[#a3a3a3]">ROI ({label})</span>
+                        <span className={roiColor}>{roiText}</span>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[11px] text-[#a3a3a3]">Volume ({label})</span>
+                        <span className="text-[#f5f5f5]">{fmtUsd(t.volume)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })
           )}
 
           {/* Pagination */}

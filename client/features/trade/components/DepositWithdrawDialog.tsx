@@ -117,12 +117,15 @@ export function DepositWithdrawDialog({
 
       {open && typeof document !== "undefined" &&
         createPortal(
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+          <div className="fixed inset-0 z-[100] flex items-end justify-center p-0 sm:items-center sm:p-4">
             <div
               className="absolute inset-0 bg-black/60 backdrop-blur-sm"
               onClick={() => setOpen(false)}
             />
-            <div className="relative w-[380px] max-w-full rounded-xl border border-[#334155] bg-[#19191A] text-[#f5f5f5] shadow-[0_20px_60px_rgba(0,0,0,.6)]">
+            <div
+              className="relative max-h-[92dvh] w-full max-w-full overflow-y-auto rounded-t-2xl border border-[#334155] bg-[#19191A] text-[#f5f5f5] shadow-[0_20px_60px_rgba(0,0,0,.6)] sm:w-[380px] sm:rounded-xl"
+              style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+            >
               <div className="p-5">
                 {/* Header */}
                 <div className="flex items-center justify-between">

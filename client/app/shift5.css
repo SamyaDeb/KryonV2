@@ -152,14 +152,14 @@
 .s5-nav-logo-link {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.4rem;
   text-decoration: none;
   color: #f5f5f5;
   transition: opacity .2s;
 }
 .s5-nav-logo-link:hover { opacity: .7 }
-.s5-nav-logo-img  { width:36px; height:11px; object-fit:contain; }
-.s5-nav-logo-text { font-size:1.125rem; font-weight:700; letter-spacing:normal; color:#f5f5f5 }
+.s5-nav-logo-img  { width:44px; height:44px; object-fit:contain; }
+.s5-nav-logo-text { font-size:1.375rem; font-weight:700; letter-spacing:normal; color:#f5f5f5 }
 
 .s5-menu-pill {
   display: inline-flex;
@@ -251,33 +251,45 @@
   display: grid;
   grid-template-columns: 1fr calc(30% - 80px);
   align-items: start;
+  /* Dark fill shows through the empty right track below the Explore card
+     (the sticky right col is shorter than the left), matching the dark
+     left side. Border only on the bottom edge marks where the grid ends
+     and both columns scroll together past it. */
+  background: #111;
+  border-bottom: 1px solid rgba(181,153,229,0.35);
 }
 .s5-left-col {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
-/* sticky top = -(rightColHeight - 100vh) = -(160vh - 100vh) = -60vh
-   Sticks exactly when the right col's bottom reaches the viewport bottom,
-   then releases naturally when the grid ends — zero JS, zero coordinate math,
-   zero horizontal shift. Right col heights: 50vh + 70vh + 40vh = 160vh. */
+/* sticky top = -(rightColHeight - 100vh) = -(166vh - 100vh) = -66vh
+   Sticks exactly when the right col's bottom (the Explore card edge) reaches
+   the viewport bottom, then releases naturally when the grid ends — zero JS,
+   zero coordinate math, zero horizontal shift.
+   Right col heights: 50vh + 70vh + 46vh = 166vh. Keep this offset in sync
+   with any change to those three flex-basis values. */
 .s5-right-col {
   display: flex;
   flex-direction: column;
   align-self: start;
   position: sticky;
-  top: -60vh;
+  top: -66vh;
 }
 
 /* Hero left — first block inside .s5-left-col */
 
 .s5-hero-left {
   background: #1d0d2b;
-  padding: 6.5rem 3rem 4.5rem;
+  /* Desktop hero composition (was inline in JSX — moved here so breakpoints can
+     override it). The extra top padding clears the fixed nav; the fixed height +
+     internal translateY offsets create the staggered "Perps / Reimagined." look. */
+  padding: calc(6.5rem + 60px) 3rem 4.5rem;
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
-  min-height: calc(100vh - 120px);
+  height: calc(100vh - 140px);
+  min-height: unset;
   overflow: hidden;
 }
 
@@ -285,6 +297,7 @@
   display: flex;
   flex-direction: column;
   flex: 1;
+  transform: translateY(-47px);
 }
 .s5-hero-title-wrap > .s5-hero-intel:last-child {
   margin-top: auto;
@@ -294,7 +307,10 @@
   align-items: flex-start;
   gap: 0;
   margin-bottom: -.25rem;
+  padding-top: 60px;
+  transform: translateY(-20px);
 }
+.s5-hero-intel--btm { transform: translateY(30px); }
 .s5-op-slash-group {
   display: inline-flex;
   align-items: baseline;
@@ -720,6 +736,10 @@
 .s5-solutions-track {
   display: flex;
   will-change: transform;
+  /* Step distance per carousel index — kept in sync with .s5-solution-card width
+     at each breakpoint so the inline translateX() in LandingPage.tsx always lands
+     a card exactly in the viewport. */
+  --s5-card-step: 33.333vw;
 }
 
 .s5-solution-card {
@@ -1228,37 +1248,135 @@
    RESPONSIVE
    ══════════════════════════════════════════ */
 @media (max-width: 1024px) {
-  .s5-hero { grid-template-columns: 1fr }
-  .s5-hero-left, .s5-hero-right { min-height: auto }
-  .s5-hero-right { padding-top: 3rem }
-
-  .s5-media-section { grid-template-columns: 1fr }
-  .s5-media-right {
+  /* Main two-column hero grid → stacked single column.
+     The right column is sticky with a negative top offset on desktop; on
+     tablet/mobile it must become a normal, static block so it flows below
+     the left column instead of overlapping or being clipped. */
+  .s5-main-grid { grid-template-columns: 1fr; }
+  .s5-left-col { min-height: auto; }
+  .s5-right-col {
     position: static;
-    height: auto;
-    flex-direction: row;
-    flex-wrap: wrap;
+    top: auto;
   }
-  .s5-right-mid { flex: 1 1 auto }
-  .s5-right-cta { flex: 0 0 clamp(160px, 25vh, 280px) }
+
+  /* Hero left: drop the desktop full-viewport height and the staggered
+     translateY offsets — those only make sense inside the fixed-height,
+     sticky desktop composition. Stacked, the headline should simply flow. */
+  .s5-hero-left {
+    min-height: auto;
+    padding: 7rem 2rem 3rem;
+    height: auto;
+  }
+  .s5-hero-title-wrap { transform: none; }
+  .s5-hero-title-wrap > .s5-hero-intel:last-child { margin-top: 0; }
+  .s5-op-row { padding-top: 0; transform: none; }
+  .s5-hero-intel--btm { transform: none; }
+
+  /* Right-col panels used fixed vh flex-basis tuned for the sticky desktop
+     layout; let them grow to their content once stacked. */
+  .s5-hero-right { flex: 0 0 auto; padding: 2.5rem 2rem; }
+  .s5-right-mid  { flex: 0 0 auto; }
+  .s5-right-cta  { flex: 0 0 auto; min-height: clamp(180px, 30vh, 280px); }
 
   .s5-video-block { aspect-ratio: 16 / 9 }
   .s5-cards-block { grid-template-columns: 1fr }
   .s5-headline-card { border: 1.2px solid #000; border-top: none }
-  .s5-headline-card:first-child { border-top: 1px solid #000 }
+  .s5-headline-card:first-child { border-top: 1px solid #000; border-left: 1px solid #000 }
 
-  .s5-solution-card { width: 80vw; height: 85vh }
+  /* Carousel: show one near-full card with a small peek of the next. */
+  .s5-solutions-track { --s5-card-step: 72vw; }
+  .s5-solution-card { width: 72vw; height: auto; min-height: 64vh }
 
   .s5-insights { grid-template-columns: 1fr }
   .s5-insights-featured { position: static; height: auto; min-height: 60vh }
   .s5-insights-grid { grid-template-columns: 1fr; position: static; height: auto; overflow-y: visible }
 
-  .s5-cta-contact { grid-template-columns: 1fr; gap: 1rem }
   .s5-footer { padding: 32px 20px; }
-  .s5-footer-panel { padding: 32px 28px 0; border-radius: 20px; }
+  .s5-footer-panel { padding: 32px 28px 32px; border-radius: 20px; }
   .s5-footer-panel-grid { grid-template-columns: 100px 1fr 1fr; gap: 24px; }
   .s5-footer-logo { width: 40px; height: 40px; }
   .s5-footer-col-h, .s5-footer-col-list li, .s5-footer-col-list li a { font-size: 20px; }
   .s5-footer-signup { grid-template-columns: 1fr; }
   .s5-footer-subscribe-btn { justify-self: start; padding: 16px 28px; }
+  /* No tucked-up overlap on stacked footers — give the wordmark a clean baseline. */
+  .s5-footer-wordmark { margin-top: 0; }
+}
+
+@media (max-width: 640px) {
+  /* The decorative custom scroll indicator is desktop-only flourish; on touch
+     it just overlaps the right edge of full-bleed cards. */
+  .s5-scrollbar-track { display: none; }
+
+  /* Fixed nav: logo (left) + MENU pill (right) align via the flex header.
+     Tighten padding and scale the logo so the row reads cleanly on phones. */
+  .s5-fixed-nav { padding: 0.85rem 1.1rem; }
+  .s5-nav-logo-img  { width: 34px; height: 34px; }
+  .s5-nav-logo-text { font-size: 1.1rem; }
+  .s5-menu-pill { padding: .45rem .9rem .45rem .8rem; font-size: .66rem; }
+
+  /* Hero headline: larger type, dropped toward the bottom of the hero panel.
+     Both lines stay on one row each (white-space:nowrap); the size is tuned so
+     the longest line ("Reimagined.") never overflows down to 320px. */
+  .s5-hero-left {
+    /* Shorter violet panel on mobile: trim the empty space above the heading
+       (top padding) and the overall min-height. Top padding still clears the
+       fixed nav (~61px). */
+    padding: 4.25rem 1.25rem 2.25rem;
+    min-height: 38.8vh;
+    justify-content: flex-end;
+  }
+  .s5-hero-title-wrap {
+    flex: none;
+    gap: 0.1rem;
+    margin-top: 0;
+  }
+  .s5-hero-intel {
+    font-size: clamp(2.75rem, 14.5vw, 5rem);
+    line-height: 0.95;
+  }
+  .s5-hero-slash-img {
+    height: clamp(2.5rem, 13vw, 4.6rem);
+    margin-left: 0.12em;
+  }
+  .s5-op-row { margin-bottom: 0; }
+
+  .s5-hero-right { padding: 2.25rem 1.25rem; }
+  .s5-hero-right-desc { font-size: 1.15rem; max-width: none; }
+
+  .s5-right-mid { padding: 1.75rem 1.25rem 1.25rem; }
+
+  .s5-right-cta { padding: 1.5rem 1.25rem 2rem; }
+  .s5-cta-arrow-img { width: 96px; height: 96px; }
+  .s5-right-cta .s5-explore-text { font-size: 1.3rem; }
+
+  .s5-headline-card { padding: 2rem 1.5rem; min-height: 0; }
+  .s5-headline-title { font-size: 1.25rem; }
+
+  /* Solutions header: title + arrows stack a bit tighter; reduce big title. */
+  .s5-solutions-header { padding: 2.5rem 1.25rem 1.25rem; }
+  .s5-solutions-title { font-size: 1.85rem; }
+  .s5-solution-illustration { padding: 1.75rem 1.5rem; min-height: 220px; }
+  .s5-solution-content { padding: 1.5rem 1.5rem 2rem; }
+
+  /* One card = full viewport width on phones (no awkward side gap). The track
+     step matches so paging lands each card flush. */
+  .s5-solutions-track { --s5-card-step: 100vw; }
+  .s5-solution-card { width: 100vw; min-height: 58vh; border-left: 0.5px solid #000; }
+
+  .s5-insights-featured-content { padding: 2rem 1.5rem 2.25rem; }
+  .s5-insights-featured-title { font-size: 1.45rem; }
+  .s5-insight-card { padding: 1.5rem 1.25rem; aspect-ratio: auto; }
+
+  .s5-footer { padding: 28px 16px; }
+  .s5-footer-panel { padding: 28px 20px 24px; }
+  /* Footer columns: stack the logo above a 2-up link grid so the headings
+     don't overflow a 320px viewport. */
+  .s5-footer-panel-grid { grid-template-columns: 1fr 1fr; gap: 22px 18px; padding-bottom: 8px; }
+  .s5-footer-panel-grid > :first-child { grid-column: 1 / -1; }
+  .s5-footer-col-h, .s5-footer-col-list li, .s5-footer-col-list li a { font-size: 18px; }
+  .s5-footer-signup { padding: 0 0 40px; }
+  .s5-footer-signup-field { font-size: clamp(24px, 8vw, 40px); }
+  .s5-footer-subscribe-btn { padding: 14px 24px; }
+  /* Keep the giant KRYON wordmark clear of the link grid with a real gap. */
+  .s5-footer-wordmark { margin-top: 12px; }
 }

@@ -100,6 +100,71 @@
   }
   html {
     @apply font-sans;
+    /* Belt-and-suspenders against accidental horizontal scroll on mobile.
+       `clip` (unlike `hidden`) does NOT create a scroll container, so it never
+       breaks `position: sticky` inside the page. */
+    overflow-x: clip;
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    /* Avoid rubber-band scroll chaining into parent surfaces on touch. */
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* Smoother momentum scrolling for inner panels on iOS. */
+  .overflow-y-auto,
+  .overflow-auto,
+  .overflow-x-auto {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Responsive utilities
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* iOS Safari zooms the page when a focused input has font-size < 16px. Force a
+   16px minimum on small / touch screens so focusing the order ticket, deposit
+   amount, search, etc. never triggers an unwanted zoom. Range sliders excluded
+   so the leverage control keeps its slim track. */
+@media (max-width: 1023px) {
+  input:not([type="range"]),
+  textarea,
+  select {
+    font-size: 16px !important;
+  }
+}
+
+/* Safe-area aware padding helpers (iOS notch / home indicator). Each adds the
+   inset to whatever padding the element already has. */
+.pt-safe { padding-top: env(safe-area-inset-top); }
+.pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+.pl-safe { padding-left: env(safe-area-inset-left); }
+.pr-safe { padding-right: env(safe-area-inset-right); }
+.px-safe {
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+/* Reserve space below a fixed bottom bar so it never overlaps the home bar. */
+.mb-safe { margin-bottom: env(safe-area-inset-bottom); }
+
+/* Hide scrollbars while keeping scroll (used by horizontally-scrolling rails). */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+  display: none;
+}
+
+/* Comfortable minimum hit target on touch devices without changing visual size
+   on desktop. Opt-in via `.touch-target`. */
+@media (pointer: coarse) {
+  .touch-target {
+    min-height: 40px;
+    min-width: 40px;
   }
 }
 

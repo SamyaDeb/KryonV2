@@ -63,17 +63,17 @@ export function BottomPanel({ marketId }: { marketId: number }) {
   ];
 
   const tabCls = (active: boolean) =>
-    `px-4 py-[11px] text-[12.5px] font-medium relative transition-colors ${
+    `whitespace-nowrap shrink-0 px-4 py-[11px] text-[12.5px] font-medium relative transition-colors ${
       active
         ? "text-[#f5f5f5] after:content-[''] after:absolute after:left-[14px] after:right-[14px] after:bottom-[-1px] after:h-[2px] after:bg-[#f5f5f5] after:rounded-[2px]"
         : "text-[#a3a3a3] hover:text-[#f5f5f5]"
     }`;
 
   return (
-    <div className="rounded-none border border-[#2A2A31] bg-[#19191A] overflow-hidden">
+    <div className="flex h-full flex-col overflow-hidden rounded-none border border-[#2A2A31] bg-[#19191A]">
       {/* Tab bar */}
-      <div className="flex items-center justify-between border-b border-[#2A2A31]">
-        <div className="flex">
+      <div className="flex flex-col border-b border-[#2A2A31] lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex overflow-x-auto no-scrollbar">
           {TABS.map(({ key, count }) => (
             <button key={key} className={tabCls(activeTab === key)} onClick={() => setActiveTab(key)}>
               {key}
@@ -85,7 +85,7 @@ export function BottomPanel({ marketId }: { marketId: number }) {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-[8px] pr-3 py-1.5">
+        <div className="flex items-center gap-[8px] overflow-x-auto no-scrollbar border-t border-[#2A2A31] px-3 py-1.5 lg:border-t-0 lg:pl-0 lg:pr-3">
           {/* Market filter */}
           <div className="relative">
             <button
@@ -135,8 +135,8 @@ export function BottomPanel({ marketId }: { marketId: number }) {
         </div>
       </div>
 
-      {/* Content */}
-      <div className="overflow-y-auto" style={{ maxHeight: 160 }}>
+      {/* Content — taller on mobile (own tab) than in the desktop grid row */}
+      <div className="flex-1 overflow-y-auto max-h-[calc(100dvh-260px)] lg:max-h-[160px]">
         {activeTab === "Positions" && <PositionsTable marketFilter={marketFilter} sideFilter={sideFilter} />}
         {activeTab === "Open Orders" && <OpenOrdersTable marketFilter={marketFilter} sideFilter={sideFilter} />}
         {activeTab === "Trade History" && <TradeHistoryTable marketFilter={marketFilter} />}

@@ -39,7 +39,8 @@ export function OrderHistoryTable({
   const cols = ["Time", "Market", "Type", "Side", "Size", "Price", "Status"];
 
   return (
-    <table className="w-full text-[12px] tabular">
+    <div className="overflow-x-auto no-scrollbar">
+    <table className="w-full min-w-[560px] text-[12px] tabular">
       <thead>
         <tr className="text-[10px] text-[#737373] font-semibold uppercase tracking-wider">
           {cols.map((h, i) => (
@@ -90,6 +91,7 @@ export function OrderHistoryTable({
         })}
       </tbody>
     </table>
+    </div>
   );
 }
 
