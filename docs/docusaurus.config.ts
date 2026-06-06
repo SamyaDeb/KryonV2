@@ -5,7 +5,7 @@ import { themes as prismThemes } from "prism-react-renderer";
 const config: Config = {
   title: "Kryon Protocol",
   tagline: "Decentralised perpetual futures on Stellar / Soroban",
-  favicon: "img/favicon.svg",
+  favicon: "img/favicon.png",
 
   // Served from the same deployment as the trading client, under /docs.
   url: "https://client-eight-mu-71.vercel.app",
@@ -45,8 +45,11 @@ const config: Config = {
   themeConfig: {
     colorMode: { defaultMode: "dark", respectPrefersColorScheme: true },
     navbar: {
-      title: "Kryon",
-      logo: { alt: "Kryon", src: "img/logo.png", width: 32, height: 32 },
+      title: "KRYON",
+      // Clicking the logo / KRYON wordmark returns to the landing page (site
+      // root), not the docs home. `href` is emitted as-is, so it escapes the
+      // /docs/ baseUrl prefix. target _self keeps it in the same tab.
+      logo: { alt: "Kryon", src: "img/logo.png", width: 44, height: 44, href: "/", target: "_self" },
       items: [
         { type: "docSidebar", sidebarId: "docs", position: "left", label: "Documentation" },
         { href: "https://github.com/SamyaDeb/KryonV2", label: "GitHub", position: "right" },
