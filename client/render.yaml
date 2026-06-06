@@ -108,3 +108,19 @@ services:
         value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
       - key: DATABASE_URL
         sync: false
+
+  - type: worker
+    name: kryon-reconciler
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/settlement-reconciler.ts
+    plan: free
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: SETTLEMENT_JOB_MAX_AGE_MINUTES
+        value: "15"
+      - key: DATABASE_URL
+        sync: false   # set in Render dashboard — do not commit secrets
+      - key: MATCHER_OPERATOR_SECRET
+        sync: false
