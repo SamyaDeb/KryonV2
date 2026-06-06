@@ -36,3 +36,9 @@ npm-debug.log*
 
 # Claude Code local state
 .claude/
+
+# Audit reports (local reference only, not published)
+Audit Reports/
+AUDIT_REPORT.md
+FINAL_AUDIT_REPORT.md
+MainnetImpAudit.md
