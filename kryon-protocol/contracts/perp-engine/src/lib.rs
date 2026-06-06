@@ -200,7 +200,8 @@ impl PerpEngineContract {
         let current = funding_state(&env, market_id);
         let oi_long = side_open_interest(&env, market_id, true);
         let oi_short = side_open_interest(&env, market_id, false);
-        let next = update_from_imbalance(&cfg, &current, oi_long, oi_short, env.ledger().timestamp())?;
+        let next =
+            update_from_imbalance(&cfg, &current, oi_long, oi_short, env.ledger().timestamp())?;
         env.storage()
             .persistent()
             .set(&DataKey::FundingState(market_id), &next);

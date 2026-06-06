@@ -105,9 +105,9 @@ mod tests {
         let oi_short = PRECISION;
         let next = update_from_imbalance(&cfg, &state, oi_long, oi_short, 3_600).unwrap();
         let delta = next.long_index; // prev was 0
-        // Total paid by longs = delta * oi_long / PRECISION
-        // Total received by shorts = delta * oi_short / PRECISION (note: short_index decreased by same delta)
-        // Net surplus = delta * (oi_long - oi_short) / PRECISION
+                                     // Total paid by longs = delta * oi_long / PRECISION
+                                     // Total received by shorts = delta * oi_short / PRECISION (note: short_index decreased by same delta)
+                                     // Net surplus = delta * (oi_long - oi_short) / PRECISION
         let oi_imbalance = checked_sub(oi_long, oi_short).unwrap();
         let net_surplus = mul_div(delta, oi_imbalance, PRECISION).unwrap();
         let expected_surplus = mul_div(delta, 8 * PRECISION, PRECISION).unwrap();

@@ -211,8 +211,7 @@ mod tests {
             "account should be liquidatable at price=94"
         );
 
-        let shortfall =
-            checked_sub(health.maintenance_margin_required, health.equity).unwrap();
+        let shortfall = checked_sub(health.maintenance_margin_required, health.equity).unwrap();
         assert!(shortfall > 0, "shortfall should be positive");
 
         // partial_liquidation_bps=5000 means max 50% per step
@@ -229,7 +228,8 @@ mod tests {
         // close_size should be the minimum needed to cover shortfall
         // min_size_to_cover = size * shortfall / notional
         let position_notional = 94 * 10 * PRECISION; // 940 * PRECISION
-        let expected_min = protocol_core::mul_div(10 * PRECISION, shortfall, position_notional).unwrap();
+        let expected_min =
+            protocol_core::mul_div(10 * PRECISION, shortfall, position_notional).unwrap();
         assert_eq!(plan.close_size, expected_min);
     }
 }

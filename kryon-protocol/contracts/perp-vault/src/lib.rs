@@ -103,11 +103,7 @@ impl PerpVaultContract {
     /// toward zero. Any uncovered remainder is recorded as protocol bad debt.
     /// Returns the amount covered. Idempotent for non-negative balances (returns 0).
     /// Only the liquidation contract may call.
-    pub fn absorb_bad_debt(
-        env: Env,
-        user: Address,
-        asset: Address,
-    ) -> Result<i128, CoreError> {
+    pub fn absorb_bad_debt(env: Env, user: Address, asset: Address) -> Result<i128, CoreError> {
         require_liquidation(&env)?;
         let balance = balance_of(env.clone(), user.clone(), asset.clone());
         if balance >= 0 {
@@ -850,14 +846,20 @@ mod tests {
             &Symbol::new(&env, "USDC"),
             &publisher,
             &OracleSource::Reflector,
-            &OracleGuard { max_age_secs: 60, max_confidence_bps: 100 },
+            &OracleGuard {
+                max_age_secs: 60,
+                max_confidence_bps: 100,
+            },
             &true,
         );
         oracle.set_feed(
             &Symbol::new(&env, "BTC"),
             &publisher,
             &OracleSource::Reflector,
-            &OracleGuard { max_age_secs: 60, max_confidence_bps: 100 },
+            &OracleGuard {
+                max_age_secs: 60,
+                max_confidence_bps: 100,
+            },
             &true,
         );
         // USDC = $1, BTC = $10 (using PRECISION scale)

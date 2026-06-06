@@ -92,10 +92,8 @@ pub fn account_health(
             // Isolated position's contribution to equity is capped at 0 on the downside
             // (losses beyond the locked margin cannot consume cross collateral)
             let pos_equity = checked_add(p.margin, upnl)?;
-            isolated_equity = checked_add(
-                isolated_equity,
-                if pos_equity > 0 { pos_equity } else { 0 },
-            )?;
+            isolated_equity =
+                checked_add(isolated_equity, if pos_equity > 0 { pos_equity } else { 0 })?;
         } else {
             cross_unrealized = checked_add(cross_unrealized, upnl)?;
         }
@@ -121,8 +119,10 @@ pub fn account_health(
         if p.mode == MarginMode::Cross {
             let market = markets.get(p.market_id).ok_or(CoreError::InvalidConfig)?;
             let n = notional(p.size, market.oracle_price)?;
-            cross_maintenance =
-                checked_add(cross_maintenance, apply_bps(n, market.config.maintenance_margin_bps)?)?;
+            cross_maintenance = checked_add(
+                cross_maintenance,
+                apply_bps(n, market.config.maintenance_margin_bps)?,
+            )?;
         }
     }
     let cross_equity = checked_add(cross_collateral, cross_unrealized)?;
