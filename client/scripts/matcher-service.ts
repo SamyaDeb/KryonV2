@@ -24,10 +24,11 @@ import { neon, neonConfig, type NeonQueryFunction } from "@neondatabase/serverle
 neonConfig.fetchConnectionCache = true;
 import { ACTIVE_MARKETS, NETWORK } from "../config";
 import { simulateSettleFill, submitSettleFillSigned } from "../lib/stellar/settlement";
+import { assertRequiredSecrets, assertNoPublicSecretLeak } from "../lib/secrets-check";
+assertRequiredSecrets(["DATABASE_URL"]);
+assertNoPublicSecretLeak();
 
 type Sql = NeonQueryFunction<false, false>;
-
-const POLL_INTERVAL_MS = 1_000;
 const NETWORK_NAME = NETWORK.name;
 const PRICE_PRECISION = 1e18;
 const AMOUNT_PRECISION = 1e7;
@@ -473,6 +474,7 @@ async function tick(sql: Sql) {
         }
       }
     }
+
   }
 
   return totalFills;

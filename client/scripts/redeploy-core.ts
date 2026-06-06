@@ -46,8 +46,9 @@ const WASM: Record<string, string> = {
 };
 
 // Existing contracts we keep (already controlled by our key or unchanged)
-const ORACLE_ADAPTER = "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP";
-const USDC_CONTRACT  = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const ORACLE_ADAPTER    = "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP";
+const USDC_CONTRACT     = "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA";
+const INSURANCE_CONTRACT = process.env.NEXT_PUBLIC_CONTRACT_INSURANCE ?? "CD45VRVGRW6BWMTG4HYKVKFMTOCOHMFGUU226G4363HPIUSPLKPM54KT";
 
 // Market constants (from original deployment config)
 const PRECISION = BigInt("1000000000000000000"); // 1e18
@@ -263,6 +264,10 @@ async function main() {
   const domainBytes = Buffer.from(NETWORK, "utf8");
   account = await callContract(server, kp, account, gatewayId, "set_domain",
     [xdr.ScVal.scvBytes(domainBytes)], "gateway.set_domain");
+
+  // M1: wire insurance address on engine so update_funding can route surplus/deficit
+  account = await callContract(server, kp, account, engineId, "set_insurance",
+    [addr(INSURANCE_CONTRACT)], "engine.set_insurance");
 
   console.log("");
 
