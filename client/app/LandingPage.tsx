@@ -26,12 +26,12 @@ const SYSTEM_STATUS = [
 
 const HEADLINES = [
   { title: 'XLM-PERP Now Live on Stellar Testnet', desc: 'USDC-settled perpetual futures with on-chain margin and settlement — trade self-custodial straight from your Freighter wallet.' },
-  { title: 'Kryon Brings RWA Perpetuals to Stellar', desc: 'A decentralized exchange pairing an off-chain central-limit order book with a fully on-chain margin and settlement engine on Soroban.' },
+  { title: 'Kryon Brings Perpetuals to Stellar', desc: 'A decentralized exchange pairing an off-chain central-limit order book with a fully on-chain margin and settlement engine on Soroban.' },
   { title: 'Sub-Second Fills, On-Chain Truth', desc: 'Price-time matching off-chain for a familiar low-latency perp experience, with custody, margin, and settlement enforced on-chain.' },
 ];
 
 const SOLUTIONS = [
-  { title: 'RWA Perpetuals', desc: 'Trade perpetual futures on tokenized real-world assets and crypto, USDC-settled, with leverage and transparent funding.' },
+  { title: 'Perpetuals', desc: 'Trade perpetual futures on tokenized real-world assets and crypto, USDC-settled, with leverage and transparent funding.' },
   { title: 'On-Chain Settlement', desc: 'Collateral, margin, and settlement live on Soroban. You keep your keys — every fill settles to a contract you control.' },
   { title: 'CLOB Matching', desc: 'An off-chain central-limit order book matches orders price-time for low-latency fills, while on-chain state stays the source of truth.', accent: true },
   { title: 'Risk & Liquidation', desc: 'A transparent margin engine, funding mechanism, and insurance-backed liquidation keep markets solvent and fair.' },
@@ -43,7 +43,7 @@ const INSIGHTS = [
   { title: 'Self-Custodial Trading with Freighter', date: 'May 6, 2026', desc: 'Sign orders from your own wallet — your keys, your collateral, every fill.' },
   { title: 'Understanding Funding & Mark Price on Kryon', date: 'April 24, 2026', desc: 'How the funding mechanism anchors perp prices to the oracle.' },
   { title: 'Inside the Liquidation & Insurance Engine', date: 'April 11, 2026', desc: 'Transparent margin checks and an insurance fund that keeps markets solvent.' },
-  { title: 'The Road to RWA Perpetuals', date: 'March 30, 2026', desc: 'Bringing tokenized real-world assets to perpetual futures on Stellar.' },
+  { title: 'The Road to Perpetuals', date: 'March 30, 2026', desc: 'Bringing tokenized real-world assets to perpetual futures on Stellar.' },
   { title: 'Oracle Design: Pricing Perps on Soroban', date: 'March 18, 2026', desc: 'How the oracle adapter publishes the prices the engine settles against.' },
   { title: 'Leaderboard & Portfolio Analytics', date: 'March 5, 2026', desc: 'Track PnL, open interest, and ranking across every market in real time.' },
   { title: 'Kryon Stress-Test Report: Production Hardening', date: 'February 20, 2026', desc: 'Findings and fixes from load-testing the matcher, indexer, and settlement path.' },
@@ -472,7 +472,7 @@ export function LandingPage() {
           <div className="s5-right-col">
             <div className="s5-hero-right">
               <p className="s5-hero-right-desc s5-fade-up" style={{ animationDelay: '0.4s' }}>
-                Trade RWA Perpetuals<br />
+                Trade Perpetuals<br />
                 on Stellar with superfast<br />
                 Decentralized Execution.
               </p>
@@ -529,7 +529,7 @@ export function LandingPage() {
           <div className="s5-solutions-header s5-reveal" ref={solHeaderRef}>
             <div>
               <h2 className="s5-solutions-title">Engineered</h2>
-              <h2 className="s5-solutions-title">for RWA Perps</h2>
+              <h2 className="s5-solutions-title">for Perps</h2>
             </div>
             <div className="s5-solutions-arrows">
               <button className="s5-arrow-btn" onClick={goPrev} aria-label="Previous">
@@ -651,7 +651,7 @@ export function LandingPage() {
               <div>
                 <h3 className="s5-footer-col-h">Features<sup>4</sup></h3>
                 <ul className="s5-footer-col-list">
-                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">RWA Perpetuals</a></li>
+                  <li><span className="s5-footer-col-arrow">↳</span><a href="#">Perpetuals</a></li>
                   <li><span className="s5-footer-col-arrow">↳</span><a href="#">On-Chain Settlement</a></li>
                   <li><span className="s5-footer-col-arrow">↳</span><a href="#">CLOB Matching</a></li>
                   <li><span className="s5-footer-col-arrow">↳</span><a href="#">Risk & Liquidation</a></li>
