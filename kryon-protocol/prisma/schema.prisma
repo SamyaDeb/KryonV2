@@ -129,6 +129,8 @@ model Order {
   expiryTs    BigInt
   cancelled   Boolean  @default(false)
   filledSize  String   @default("0")
+  /// Client settlement signature (hex/base64) for settle_fill_signed.
+  signature   String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -338,7 +340,7 @@ model TraderStat {
   referralCount      Int         @default(0)
   referralVolume     String      @default("0") // 1e7
   lastTradeAt        DateTime?
-  updatedAt          DateTime    @updatedAt
+  updatedAt          DateTime    @default(now()) @updatedAt
   createdAt          DateTime    @default(now())
 
   @@unique([network, address, period])
@@ -362,7 +364,7 @@ model LeaderboardSnapshot {
   rankings    Json
   traderCount Int         @default(0)
 
-  @@index([network, period, metric, capturedAt])
+  @@index([network, period, metric, capturedAt], map: "LeaderboardSnapshot_lookup_idx")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -384,8 +386,8 @@ model BalanceChange {
   txHash     String
   createdAt  DateTime          @default(now())
 
-  @@unique([network, txHash, address, kind])
-  @@index([network, address, createdAt])
+  @@unique([network, txHash, address, kind], map: "BalanceChange_unique_idx")
+  @@index([network, address, createdAt], map: "BalanceChange_acct_time_idx")
   @@index([address])
 }
 
@@ -408,9 +410,9 @@ model PnlEvent {
   refKey      String
   createdAt   DateTime     @default(now())
 
-  @@unique([network, address, kind, refKey])
-  @@index([network, address, createdAt])
-  @@index([marketId, kind])
+  @@unique([network, address, kind, refKey], map: "PnlEvent_unique_idx")
+  @@index([network, address, createdAt], map: "PnlEvent_acct_time_idx")
+  @@index([marketId, kind], map: "PnlEvent_market_kind_idx")
 }
 
 /// Per-account funding payments (debits/credits) split out from the
@@ -427,8 +429,8 @@ model FundingPayment {
   txHash      String
   createdAt   DateTime @default(now())
 
-  @@unique([network, address, marketId, fundingIndex])
-  @@index([network, address, createdAt])
+  @@unique([network, address, marketId, fundingIndex], map: "FundingPayment_unique_idx")
+  @@index([network, address, createdAt], map: "FundingPayment_acct_time_idx")
 }
 
 /// Periodic snapshot of an account's full portfolio state for historical
@@ -452,7 +454,7 @@ model PortfolioSnapshot {
   liquidatable       Boolean  @default(false)
   capturedAt         DateTime @default(now())
 
-  @@index([network, address, capturedAt])
+  @@index([network, address, capturedAt], map: "PortfolioSnapshot_acct_time_idx")
 }
 
 /// Cached, denormalized per-account analytics for instant portfolio header
@@ -473,7 +475,7 @@ model AccountAnalytics {
   maxDrawdown       String   @default("0") // 1e7 (worst equity dip)
   firstTradeAt      DateTime?
   lastTradeAt       DateTime?
-  updatedAt         DateTime @updatedAt
+  updatedAt         DateTime @default(now()) @updatedAt
 
   @@id([network, address])
   @@index([network])
