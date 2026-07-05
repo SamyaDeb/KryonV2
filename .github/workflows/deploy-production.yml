@@ -141,13 +141,16 @@ jobs:
         if: steps.creds.outputs.ok == 'true'
         run: npm run cf:build
 
+      # Use the OpenNext deploy wrapper directly: plain `wrangler deploy`
+      # detects the OpenNext project and re-invokes it as a child process,
+      # which double-builds and swallows error output.
       # Retry-wrapped: the Cloudflare API can hit transient 5xx errors; a blip
       # must not fail a release.
       - name: Deploy to Cloudflare Workers
         if: steps.creds.outputs.ok == 'true'
         run: |
           n=0; until [ $n -ge 3 ]; do
-            npx wrangler deploy && {
+            npx opennextjs-cloudflare deploy && {
               echo "### ✅ Production deploy (Cloudflare Workers)" >> "$GITHUB_STEP_SUMMARY"
               echo "Worker: kryon-client" >> "$GITHUB_STEP_SUMMARY"
               break
