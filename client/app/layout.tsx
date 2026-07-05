@@ -12,7 +12,9 @@ const poppins = Poppins({
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"),
+  // `|| fallback` (not ??): an EMPTY NEXT_PUBLIC_APP_URL is defined but makes
+  // new URL("") throw ERR_INVALID_URL and kill the whole build.
+  metadataBase: new URL(process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000"),
   title: "Kryon | Perpetuals DEX",
   description: "Decentralised perpetual futures on Stellar/Soroban — XLM-PERP",
   applicationName: "Kryon",
