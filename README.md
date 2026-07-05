@@ -76,10 +76,11 @@ The authorisation graph is strict: `Engine.open_position` requires the order gat
 | Service | Role |
 | --- | --- |
 | **Matcher** | Deterministic CLOB with price-time priority, partial fills, replace priority reset, market-order walking — settles fills on-chain via operator-signed `settle_fill` |
-| **Oracle keeper** | Publishes normalized XLM/USD prices on-chain every ~8s |
+| **Oracle keeper** | Publishes the median of Binance/Coinbase/Kraken on-chain every ~8s (≥2 sources required, deviation + USDC-depeg guards) |
 | **State indexer** | Syncs on-chain positions, OI, funding, and stats to Postgres; computes leaderboard/portfolio analytics |
 | **WebSocket server** | Real-time orderbook and trade broadcast |
 | **Settlement reconciler** | Recovers stuck/queued settlement transactions |
+| **Liquidation keeper** | Scans accounts, liquidates underwater positions, and runs the contract TTL keepalive |
 | **Monitor** | Alerting for stale oracle, bad debt, settlement failures, liquidation backlog |
 
 ### Protocol invariants (non-negotiable)
@@ -98,7 +99,7 @@ The authorisation graph is strict: `Engine.open_position` requires the order gat
 ├── client/                  Next.js 16 trading terminal, API routes, off-chain service scripts
 │   ├── app/                 App Router pages (trade, portfolio, leaderboard, markets) + /api routes
 │   ├── features/            Trade terminal, chart, wallet, navbar feature modules
-│   ├── scripts/             Oracle keeper, matcher, indexer, WS server, reconciler, test suites
+│   ├── scripts/             Oracle keeper, matcher, indexer, WS server, reconciler, liquidator, test suites
 │   └── config/              Market configs, contract addresses, precision constants
 ├── kryon-protocol/          Rust workspace — the protocol itself
 │   ├── contracts/           8 Soroban contracts (vault, engine, gateway, oracle, risk, …)
@@ -117,12 +118,12 @@ The authorisation graph is strict: `Engine.open_position` requires the order gat
 | --- | --- |
 | Governance | `CCRI6YJYXHFTGALTDPYRNFSDFWMZRVSJ6WNC3NV5ECE3E7DG4SZ3TBQ5` |
 | Oracle Adapter | `CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP` |
-| Vault | `CAULDUKSV4TRBCCFARMCS2D6SY2MJ4GDYUD4YNWTBKRY6WJGWA3HLAJ4` |
-| Engine | `CDGU5MYLXY6N3ABCOTFLL665B7UNIHSBYDDAL22A2KREGLDOHODCJEG5` |
-| Order Gateway | `CD77MHYJVQOSD467OSMSBJQSVOYPGONPOQBCJEW7R32UDMF23MBFNM6H` |
+| Vault | `CBQ6634Z3UPXFVVHHV2JNSGXHQOZZK62Z65HCAQTINBGXS3IDXKRTRYK` |
+| Engine | `CBSUYAO2EYAQVFISJQKG4TNMJPCDCPPFGI25Q3SW2BJPFSKQ45GRGTXN` |
+| Order Gateway | `CAJGC2SIV6DFJETJ6ATG5MR6RPNX5HQ26LYA4RGSHF2QPTBS6OJWONL3` |
 | Insurance | `CD45VRVGRW6BWMTG4HYKVKFMTOCOHMFGUU226G4363HPIUSPLKPM54KT` |
 | Liquidation | `CCIDLNMNP5AZL6IF5TJ75J3DXXVIONHHFVHLT36HHDCOZI24BK2VNRWK` |
-| Risk | `CD2TH65DFB23JOAHIVH63TU6CDDUFS2EWLQWX35JSK5562CLHQQKNZVA` |
+| Risk | `CAVCW7XCQRA6VYWBKFDABYZGDNUJYHEYKHR4TT6BQBHS6QPDGFJVYBDS` |
 
 Addresses are mirrored in `client/config/index.ts` and can be overridden via `NEXT_PUBLIC_CONTRACT_*` environment variables. Redeploy scripts live in `client/scripts/redeploy-*.ts`.
 
@@ -164,6 +165,7 @@ bun run dev:matcher      # match orders + settle fills on-chain
 bun run dev:indexer      # sync on-chain state → DB
 bun run dev:ws           # WebSocket server (orderbook + trades)
 bun run dev:reconciler   # recover stuck settlement transactions
+bun run dev:liquidator   # liquidate underwater positions + contract TTL keepalive
 ```
 
 A PM2 ecosystem file (`client/ecosystem.config.cjs`) and Docker Compose / Render configs are provided for running the service fleet in the cloud.
@@ -210,8 +212,8 @@ Additional harnesses live in `kryon-protocol/testing/`: stateful solvency invari
 GitHub Actions workflows (`.github/workflows/`):
 
 - **`ci.yml`** — client lint, typecheck, `npm audit`, production gate, build, plus protocol Rust checks on PRs and pushes to `main`
-- **`deploy-production.yml`** — auto-deploys the client to Vercel on pushes to `main` (paths `client/**`) after a readiness gate
-- **`deploy-client.yml`** — manual Vercel deployment pipeline; production deploys require `confirm_mainnet=mainnet`
+- **`deploy-production.yml`** — auto-deploys the client to Cloudflare Workers (via `@opennextjs/cloudflare` + `wrangler`) on pushes to `main` (paths `client/**`) after a readiness gate
+- **`deploy-client.yml`** — manual Vercel deployment pipeline (legacy/fallback); production deploys require `confirm_mainnet=mainnet`
 - **`mainnet-preflight.yml`** — manual mainnet gate requiring every contract, asset, app, websocket, database, and signer secret to be configured
 - **`production-validation.yml`** — validates the live app: security headers, readiness, core APIs, websocket reconnect storms, market-data soak, and required E2E evidence links
 - **`codeql.yml`** + **`dependency-review.yml`** + Dependabot — static security analysis and weekly dependency updates
@@ -239,10 +241,14 @@ DATABASE_URL
 MATCHER_OPERATOR_SECRET
 UPSTASH_REDIS_REST_URL
 UPSTASH_REDIS_REST_TOKEN
-VERCEL_ORG_ID
+CLOUDFLARE_API_TOKEN      # deploy-production.yml (Workers Scripts: Edit)
+CLOUDFLARE_ACCOUNT_ID     # deploy-production.yml
+VERCEL_ORG_ID             # deploy-client.yml (legacy manual deploy)
 VERCEL_PROJECT_ID
 VERCEL_TOKEN
 ```
+
+Worker **runtime** secrets (`DATABASE_URL`, `MATCHER_OPERATOR_SECRET`, `UPSTASH_*`) are set once with `wrangler secret put`, never through CI.
 
 **Live-validation variables**
 
