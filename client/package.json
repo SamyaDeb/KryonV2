@@ -13,13 +13,17 @@
     "dev:matcher": "tsx --env-file=.env.local scripts/matcher-service.ts",
     "dev:ws": "tsx --env-file=.env.local scripts/ws-server.ts",
     "dev:reconciler": "tsx --env-file=.env.local scripts/settlement-reconciler.ts",
+    "dev:liquidator": "tsx --env-file=.env.local scripts/liquidation-keeper.ts",
     "dev:monitor": "tsx --env-file=.env.local scripts/monitor.ts",
     "dev:e2e": "tsx --env-file=.env.local scripts/e2e-testnet.ts",
     "dev:soak": "tsx --env-file=.env.local scripts/soak-test.ts",
     "dev:load": "tsx --env-file=.env.local scripts/load-test.ts",
     "dev:recovery": "tsx --env-file=.env.local scripts/failure-recovery-test.ts",
     "production:gate": "tsx scripts/production-gate.ts",
-    "production:live-gate": "tsx scripts/live-production-gate.ts"
+    "production:live-gate": "tsx scripts/live-production-gate.ts",
+    "cf:build": "opennextjs-cloudflare build",
+    "cf:preview": "opennextjs-cloudflare preview",
+    "cf:deploy": "opennextjs-cloudflare deploy"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
@@ -43,6 +47,7 @@
     "zustand": "^5.0.13"
   },
   "devDependencies": {
+    "@opennextjs/cloudflare": "^1.20.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -53,7 +58,8 @@
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.107.0"
   },
   "overrides": {
     "axios": "1.16.1",

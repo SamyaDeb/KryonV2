@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Operational scripts are not app code
     "scripts/**",
+    // Generated artifacts: Docusaurus bundle + OpenNext/wrangler output
+    "public/docs/**",
+    ".open-next/**",
+    ".wrangler/**",
   ]),
 ]);
 
