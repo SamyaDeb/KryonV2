@@ -119,19 +119,32 @@ jobs:
           rm -rf ../client/public/docs
           cp -r build ../client/public/docs
 
-      # Fail fast and loud if any deploy secret is missing, instead of letting
-      # wrangler emit a confusing auth error halfway through.
-      - name: Validate deploy secrets
+      # Skip (green, with a loud notice) when Cloudflare credentials are not yet
+      # configured, so pushes to main stay green during the migration window.
+      # Once CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID are added to the
+      # production environment, this becomes a real deploy.
+      - name: Detect deploy credentials
+        id: creds
         run: |
-          test -n "$CLOUDFLARE_API_TOKEN"  || { echo "::error::CLOUDFLARE_API_TOKEN missing — add it in Settings → Environments → production"; exit 1; }
-          test -n "$CLOUDFLARE_ACCOUNT_ID" || { echo "::error::CLOUDFLARE_ACCOUNT_ID missing"; exit 1; }
+          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::Cloudflare deploy skipped — set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Settings → Environments → production to enable it."
+            {
+              echo "### ⏭ Production deploy skipped"
+              echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not configured in the production environment."
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Build Worker bundle (OpenNext)
+        if: steps.creds.outputs.ok == 'true'
         run: npm run cf:build
 
       # Retry-wrapped: the Cloudflare API can hit transient 5xx errors; a blip
       # must not fail a release.
       - name: Deploy to Cloudflare Workers
+        if: steps.creds.outputs.ok == 'true'
         run: |
           n=0; until [ $n -ge 3 ]; do
             npx wrangler deploy && {
