@@ -2,7 +2,7 @@
 #![deny(unsafe_code)]
 
 use protocol_core::CoreError;
-use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Symbol};
+use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Symbol, Val, Vec};
 
 /// 48 hours — minimum timelock delay for privileged protocol operations.
 const MIN_SAFE_DELAY_SECS: u64 = 172_800;
@@ -27,11 +27,13 @@ pub enum ProposalStatus {
 }
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct GovernanceProposal {
     pub id: BytesN<32>,
     pub target: Address,
     pub action: Symbol,
+    /// Arguments passed verbatim to `target.action(...)` at execution time.
+    pub args: Vec<Val>,
     pub wasm_hash: BytesN<32>,
     pub eta: u64,
     pub status: ProposalStatus,
@@ -89,6 +91,7 @@ impl PerpGovernanceContract {
         id: BytesN<32>,
         target: Address,
         action: Symbol,
+        args: Vec<Val>,
         wasm_hash: BytesN<32>,
         eta: u64,
     ) -> Result<GovernanceProposal, CoreError> {
@@ -113,6 +116,7 @@ impl PerpGovernanceContract {
             id: id.clone(),
             target,
             action,
+            args,
             wasm_hash,
             eta,
             status: ProposalStatus::Queued,
@@ -123,8 +127,18 @@ impl PerpGovernanceContract {
         Ok(proposal)
     }
 
+    /// Execute a matured proposal by actually invoking `target.action(args)`.
+    ///
+    /// When this governance contract is the admin of the target (the intended
+    /// mainnet topology), the target's `require_admin` is satisfied by Soroban
+    /// invoker auth — governance is the direct cross-contract caller. Status is
+    /// marked Executed BEFORE the call so a reverting target cannot make the
+    /// proposal replayable, and the guardian pause vetoes execution entirely.
     pub fn execute(env: Env, id: BytesN<32>) -> Result<GovernanceProposal, CoreError> {
         require_admin(&env)?;
+        if Self::paused(env.clone()) {
+            return Err(CoreError::Unauthorized);
+        }
         let mut proposal = proposal(&env, &id)?;
         if proposal.status != ProposalStatus::Queued {
             return Err(CoreError::InvalidConfig);
@@ -136,6 +150,8 @@ impl PerpGovernanceContract {
         env.storage()
             .persistent()
             .set(&DataKey::Proposal(id), &proposal);
+        let _: Val =
+            env.invoke_contract(&proposal.target, &proposal.action, proposal.args.clone());
         Ok(proposal)
     }
 
@@ -214,9 +230,28 @@ fn proposal(env: &Env, id: &BytesN<32>) -> Result<GovernanceProposal, CoreError>
 mod tests {
     use super::*;
     use soroban_sdk::{
+        symbol_short,
         testutils::{Address as _, Ledger},
-        Address, BytesN, Env, Symbol,
+        vec, Address, BytesN, Env, IntoVal, Symbol,
     };
+
+    /// Minimal target contract proving that execute() really invokes
+    /// target.action(args) — not just bookkeeping.
+    #[contract]
+    pub struct TestTarget;
+
+    #[contractimpl]
+    impl TestTarget {
+        pub fn poke(env: Env, value: u32) {
+            env.storage().instance().set(&symbol_short!("v"), &value);
+        }
+        pub fn value(env: Env) -> u32 {
+            env.storage()
+                .instance()
+                .get(&symbol_short!("v"))
+                .unwrap_or(0)
+        }
+    }
 
     // MIN_SAFE_DELAY_SECS = 172_800 (48 h). Tests use timestamp=100 so earliest ETA = 172_900.
     fn setup() -> (Env, Address, Address, PerpGovernanceContractClient<'static>) {
@@ -254,6 +289,7 @@ mod tests {
             &id(&env, 1),
             &Address::generate(&env),
             &Symbol::new(&env, "upgrade"),
+            &vec![&env],
             &id(&env, 2),
             &172_899,
         );
@@ -262,22 +298,34 @@ mod tests {
     }
 
     #[test]
-    fn queues_and_executes_after_delay() {
+    fn queues_and_executes_after_delay_invoking_target() {
         let (env, _admin, _guardian, governance) = setup();
+        let target_id = env.register(TestTarget, ());
+        let target = TestTargetClient::new(&env, &target_id);
+        assert_eq!(target.value(), 0);
+
         let proposal_id = id(&env, 3);
         governance.queue(
             &proposal_id,
-            &Address::generate(&env),
-            &Symbol::new(&env, "upgrade"),
+            &target_id,
+            &Symbol::new(&env, "poke"),
+            &vec![&env, 42u32.into_val(&env)],
             &id(&env, 4),
             &172_900,
         );
+        // Too early: the timelock blocks execution.
+        assert!(governance.try_execute(&proposal_id).is_err());
+        assert_eq!(target.value(), 0);
+
         env.ledger().with_mut(|ledger| {
             ledger.timestamp = 172_900;
         });
-
         let executed = governance.execute(&proposal_id);
         assert_eq!(executed.status, ProposalStatus::Executed);
+        // The target was actually invoked with the queued args.
+        assert_eq!(target.value(), 42);
+        // Executed proposals cannot be replayed.
+        assert!(governance.try_execute(&proposal_id).is_err());
     }
 
     #[test]
@@ -285,6 +333,33 @@ mod tests {
         let (_env, _admin, _guardian, governance) = setup();
         governance.emergency_pause(&true);
         assert!(governance.paused());
+    }
+
+    #[test]
+    fn guardian_pause_vetoes_execution() {
+        let (env, _admin, _guardian, governance) = setup();
+        let target_id = env.register(TestTarget, ());
+        let target = TestTargetClient::new(&env, &target_id);
+
+        let proposal_id = id(&env, 5);
+        governance.queue(
+            &proposal_id,
+            &target_id,
+            &Symbol::new(&env, "poke"),
+            &vec![&env, 7u32.into_val(&env)],
+            &id(&env, 6),
+            &172_900,
+        );
+        env.ledger().with_mut(|ledger| {
+            ledger.timestamp = 172_900;
+        });
+        governance.emergency_pause(&true);
+        assert!(governance.try_execute(&proposal_id).is_err());
+        assert_eq!(target.value(), 0);
+
+        governance.emergency_pause(&false);
+        governance.execute(&proposal_id);
+        assert_eq!(target.value(), 7);
     }
 
     fn id(env: &Env, value: u8) -> BytesN<32> {
