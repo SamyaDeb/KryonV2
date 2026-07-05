@@ -51,6 +51,52 @@ cd client && ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET \
 - After execute, verify: direct EOA admin calls on each transferred contract
   must fail; admin ops go only through governance proposals.
 
+## RESOLVED 2026-07-05 (later the same day): P0 liquidation wiring
+
+Option 2 executed. **Fresh instances deployed, wired, seeded, and enrolled:**
+
+| Contract | Address | State |
+|---|---|---|
+| liquidation | `CDCRNKXTTTOO7IRVC66KZR5QMVGGZIOF2QPJSVELLD7G7F4IVLM2DCMG` | initialized → current engine/vault/insurance, max_reward_bps 50 |
+| insurance | `CA3VD55APWCYLVN7PYGJ7NPKSQBE3VU4MWVCSKLOYAZI5RFWWR76G2CL` | initialized, set_vault(current), **seeded 500 USDC** |
+
+Cross-wiring verified by direct instance-storage reads: engine.{Liquidation,
+Insurance} ✓, vault.{Liquidation,Insurance} ✓. Configs updated everywhere
+(env local+VM, config defaults, render.yaml, manifests, GitHub production
+vars). The June instances (`CCIDLNMN…`, `CD45VRVG…`) are ABANDONED — their
+queued proposals (`f1f053af…`, `e4aa61c1…`) will fail execute; ignore them.
+
+**Two NEW proposals queued for the fresh instances, `eta = 1783445784`
+= 2026-07-07T17:36:24Z** (later than the core four).
+
+Tooling: `client/scripts/rewire-liquidation.ts` (idempotent; ONLY_GOVERNANCE=1
+reruns just the enrollment). Root-cause guard for mainnet: the deploy manifest
+must fail if any live contract references a non-manifest address — and verify
+every target's on-chain admin before phase 1.
+
+## Updated July-7 execute sequence
+
+1. ≥ 2026-07-07T09:09:35Z: `pm2 stop kryon-oracle` (on the **VM** — the fleet
+   lives there now: `ssh -i ~/.ssh/kryon-vm-oracle.key opc@92.4.91.30`), then
+   `ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET npx tsx scripts/transfer-admin-to-governance.ts execute`
+   → expect 4 successes (oracle-adapter, vault, engine, order-gateway) and 2
+   failures (the abandoned June liquidation/insurance ids — expected).
+2. ≥ 2026-07-07T17:36:24Z: rerun the same execute command → the two NEW
+   liquidation/insurance proposals execute.
+3. `ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET npx tsx scripts/verify-decentralization.ts`
+   → must print "Fully decentralized" (simulated EOA admin calls rejected on
+   all 6 contracts + governance guardian pause/unpause drill).
+4. `pm2 start kryon-oracle` on the VM.
+
+## Guardian fast-path pause (mainnet-bound source change, 2026-07-05)
+
+vault + gateway now have `set_guardian` and `emergency_pause(caller)` where
+the guardian may pause instantly but only the admin can unpause (commit
+41abc9a). The deployed testnet instances predate this — on testnet the only
+fast pause after the transfer is the governance guardian veto. On MAINNET:
+deploy with the new WASM, set a distinct guardian key on vault + gateway
+BEFORE transferring admin, and include `set_deposit_cap` in launch config.
+
 ## Blockers / follow-ups
 
 1. **liquidation (`CCIDLNMN…NRWK`) + insurance (`CD45VRVG…54KT`) admin is the
