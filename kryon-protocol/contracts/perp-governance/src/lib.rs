@@ -150,8 +150,7 @@ impl PerpGovernanceContract {
         env.storage()
             .persistent()
             .set(&DataKey::Proposal(id), &proposal);
-        let _: Val =
-            env.invoke_contract(&proposal.target, &proposal.action, proposal.args.clone());
+        let _: Val = env.invoke_contract(&proposal.target, &proposal.action, proposal.args.clone());
         Ok(proposal)
     }
 

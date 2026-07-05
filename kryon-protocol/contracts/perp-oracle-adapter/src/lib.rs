@@ -6,10 +6,10 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Ve
 
 /// Instance TTL keepalive bounds (ledgers, ~5s each).
 const INSTANCE_TTL_THRESHOLD: u32 = 241_920; // ~14 days
-// ~30 days: extending instance TTL also extends the contract CODE entry, so
-// longer windows on large WASMs exceed the u32 transaction-fee cap (~429 XLM).
-// With a 14-day threshold this is a no-op most ticks and one paid bump every
-// ~2 weeks.
+                                             // ~30 days: extending instance TTL also extends the contract CODE entry, so
+                                             // longer windows on large WASMs exceed the u32 transaction-fee cap (~429 XLM).
+                                             // With a 14-day threshold this is a no-op most ticks and one paid bump every
+                                             // ~2 weeks.
 const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 
 #[contracttype]
