@@ -32,8 +32,12 @@ pub const RECLAIM_GRACE_SECS: u64 = 86_400; // 24h
 /// past its order expiry only needs to survive until reclamation.
 const PERSISTENT_TTL_THRESHOLD: u32 = 120_960; // ~7 days
 const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400; // ~30 days
-const INSTANCE_TTL_THRESHOLD: u32 = 120_960; // ~7 days
-const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400; // ~180 days
+const INSTANCE_TTL_THRESHOLD: u32 = 241_920; // ~14 days
+// ~30 days: extending instance TTL also extends the contract CODE entry, so
+// longer windows on large WASMs exceed the u32 transaction-fee cap (~429 XLM).
+// With a 14-day threshold this is a no-op most ticks and one paid bump every
+// ~2 weeks.
+const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 
 /// Per-order fill accounting. Carries the order's expiry so the entry can be
 /// safely reclaimed once the order can no longer fill.

@@ -5,8 +5,12 @@ use protocol_core::{apply_bps, checked_sub, CoreError, OracleGuard, OracleSnapsh
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
 /// Instance TTL keepalive bounds (ledgers, ~5s each).
-const INSTANCE_TTL_THRESHOLD: u32 = 120_960; // ~7 days
-const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400; // ~180 days
+const INSTANCE_TTL_THRESHOLD: u32 = 241_920; // ~14 days
+// ~30 days: extending instance TTL also extends the contract CODE entry, so
+// longer windows on large WASMs exceed the u32 transaction-fee cap (~429 XLM).
+// With a 14-day threshold this is a no-op most ticks and one paid bump every
+// ~2 weeks.
+const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
