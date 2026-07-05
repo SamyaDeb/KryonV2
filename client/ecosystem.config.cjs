@@ -79,5 +79,19 @@ module.exports = {
       out_file: "./logs/reconciler.log",
       error_file: "./logs/reconciler.error.log",
     },
+    {
+      name: "kryon-monitor",
+      script: "npx",
+      args: "tsx --env-file=.env.local scripts/monitor.ts",
+      cwd: __dirname,
+      // The local WS server, not the public NEXT_PUBLIC_WS_URL from .env.local.
+      env: { MONITOR_WS_URL: "ws://localhost:8080" },
+      restart_delay: 10000,
+      max_restarts: 20,
+      autorestart: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      out_file: "./logs/monitor.log",
+      error_file: "./logs/monitor.error.log",
+    },
   ],
 };
