@@ -17,6 +17,7 @@
     "dev:monitor": "tsx --env-file=.env.local scripts/monitor.ts",
     "dev:e2e": "tsx --env-file=.env.local scripts/e2e-testnet.ts",
     "dev:soak": "tsx --env-file=.env.local scripts/soak-test.ts",
+    "dev:stress": "tsx --env-file=.env.local scripts/stress-test.ts",
     "dev:load": "tsx --env-file=.env.local scripts/load-test.ts",
     "dev:recovery": "tsx --env-file=.env.local scripts/failure-recovery-test.ts",
     "production:gate": "tsx scripts/production-gate.ts",

@@ -128,8 +128,11 @@ async function positionsOf(server: sorobanRpc.Server, user: string): Promise<Pos
 }
 
 async function oraclePrice(server: sorobanRpc.Server, symbol: string): Promise<bigint | null> {
+  // get_price(asset, Option<OracleGuard>) — None (scvVoid) skips the guard;
+  // execution-price banding is enforced by the engine at liquidation time.
   const res = (await simulateRead(server, CONTRACTS.oracleAdapter, "get_price", [
     nativeToScVal(symbol, { type: "symbol" }),
+    xdr.ScVal.scvVoid(),
   ])) as Record<string, unknown> | null;
   if (!res || typeof res !== "object") return null;
   const price = res["price"];

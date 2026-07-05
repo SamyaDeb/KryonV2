@@ -69,5 +69,15 @@ cd client && ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET \
    testnet-only) — treat as a hard prerequisite for the mainnet ceremony:
    **on mainnet, verify every target's on-chain admin before phase 1.**
 
+   **UPDATE (stress test, same day): this blocker is worse than an admin
+   formality.** The June liquidation/insurance instances still point at the
+   superseded June engine/vault (`set_engine`/`set_vault` were never run
+   after the 2026-07-05 core redeploy), so **no liquidation can execute at
+   all** and insurance cover/bad-debt cannot reach the new vault. Every
+   `liquidate()` fails with `Error(Contract, #6)`. Fix requires either the
+   old key (option 1) or fresh liquidation+insurance instances wired to the
+   new core (option 2) — full details and the exact call list in
+   `Audit Reports/STRESS_TEST_REPORT.md` (P0 finding).
+
 2. Mainnet: guardian must be a distinct key (ideally multisig), and the
    governance admin itself should not be the deployer EOA.

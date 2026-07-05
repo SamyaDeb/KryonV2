@@ -25,6 +25,8 @@ neonConfig.fetchConnectionCache = true;
 import { ACTIVE_MARKETS, NETWORK } from "../config";
 import { simulateSettleFill, submitSettleFillSigned } from "../lib/stellar/settlement";
 import { assertRequiredSecrets, assertNoPublicSecretLeak } from "../lib/secrets-check";
+import { verifySignedMessage } from "../lib/market/signed-intent";
+import { orderSettlementMessage, pubkeyHexFromAddress } from "../lib/market/signing-message";
 assertRequiredSecrets(["DATABASE_URL"]);
 assertNoPublicSecretLeak();
 
@@ -439,6 +441,55 @@ function fmtSize(raw: bigint) {
   return (Number(raw) / AMOUNT_PRECISION).toFixed(4);
 }
 
+// ── Oracle price band ─────────────────────────────────────────────────────────
+// The engine rejects any fill whose price deviates more than
+// max_execution_deviation_bps from the oracle (Error #16, PriceOutsideBand).
+// Matching such a fill anyway just burns a simulation and rolls back — and a
+// crossed pair parked outside the band loops that failure every tick (seen
+// live 2026-07-05: two wallets crossing at ±100% of mark). Pre-check the band
+// against the indexer-synced oracle price and skip those matches off-chain.
+
+const MAX_DEVIATION_BPS = BigInt(process.env.MATCHER_MAX_DEVIATION_BPS ?? "1000");
+
+async function loadOraclePrice(sql: Sql, marketId: number): Promise<bigint | null> {
+  const rows = await sql`SELECT "lastOraclePrice"::text FROM "Market" WHERE id = ${marketId}`;
+  if (!rows.length) return null;
+  const p = BigInt((rows[0].lastOraclePrice as string) ?? "0");
+  return p > 0n ? p : null;
+}
+
+function withinOracleBand(fillPrice: bigint, oracle: bigint): boolean {
+  const delta = (oracle * MAX_DEVIATION_BPS) / 10_000n;
+  return fillPrice >= oracle - delta && fillPrice <= oracle + delta;
+}
+
+// ── Poison-order quarantine ───────────────────────────────────────────────────
+// An order whose stored signature cannot verify on-chain (settle_fill_signed
+// is SEP-53-only) would loop match → sim-fail → rollback forever. Verify the
+// signature off-chain before matching and cancel any order that fails.
+
+function settlementSigValid(o: RestingOrder): boolean {
+  if (!o.signature) return true; // legacy auth-entry path still handles these
+  const msg = orderSettlementMessage(NETWORK.passphrase, pubkeyHexFromAddress(o.owner), {
+    owner: o.owner,
+    market_id: o.marketId,
+    is_long: o.isLong,
+    size: o.size.toString(),
+    limit_price: o.limitPrice.toString(),
+    reduce_only: o.reduceOnly,
+    nonce: o.nonce.toString(),
+    expiry_ts: o.expiryTs.toString(),
+  });
+  return verifySignedMessage(o.owner, msg, o.signature);
+}
+
+async function cancelPoisonOrder(sql: Sql, o: RestingOrder): Promise<void> {
+  await sql`UPDATE "Order" SET cancelled = true, "updatedAt" = NOW() WHERE id = ${o.id}`;
+  process.stderr.write(
+    `  ⚠ cancelled order ${o.id.slice(0, 20)}… — stored signature cannot verify on-chain\n`
+  );
+}
+
 // ── Main loop ─────────────────────────────────────────────────────────────────
 
 async function tick(sql: Sql) {
@@ -451,8 +502,38 @@ async function tick(sql: Sql) {
     ]);
     if (limitOrders.length === 0 && marketOrders.length === 0) continue;
 
-    const matches = matchAll(limitOrders, marketOrders);
+    const oracle = await loadOraclePrice(sql, market.id);
+    // Exclude out-of-band RESTING orders before matching, not just their
+    // matches after: price-time priority would otherwise allocate incoming
+    // volume to an unsettleable top-of-book quote (e.g. a stale ask far below
+    // mark), starving every legitimate order behind it. They stay in the DB —
+    // if the oracle moves to them they become matchable again.
+    const inBandLimits = oracle === null
+      ? []
+      : limitOrders.filter((o) => withinOracleBand(o.limitPrice, oracle));
+    if (inBandLimits.length < limitOrders.length) {
+      process.stderr.write(
+        `  ⤫ ${limitOrders.length - inBandLimits.length} resting order(s) outside oracle band excluded from matching\n`
+      );
+    }
+    const matches = matchAll(inBandLimits, marketOrders);
     for (const match of matches) {
+      // Fail closed: no oracle price → the engine can't accept the fill either.
+      if (oracle === null || !withinOracleBand(match.fillPrice, oracle)) {
+        process.stderr.write(
+          `  ⤫ skip match @ $${fmtPrice(match.fillPrice)} — outside oracle band` +
+          ` (oracle ${oracle === null ? "unavailable" : "$" + fmtPrice(oracle)})\n`
+        );
+        continue;
+      }
+      let poisoned = false;
+      for (const side of [match.maker, match.taker]) {
+        if (!settlementSigValid(side)) {
+          await cancelPoisonOrder(sql, side);
+          poisoned = true;
+        }
+      }
+      if (poisoned) continue;
       const ok = await persistFill(sql, match);
       if (ok) {
         totalFills++;

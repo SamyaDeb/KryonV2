@@ -29,10 +29,12 @@ function decodeSignature(signature: string): Buffer | null {
 /**
  * Verify an ed25519 message signature against the owner's public key.
  *
- * Accepts the three encodings we actually produce:
- *   1. raw message bytes      — CLI test scripts call `keypair.sign(msg)` directly
- *   2. sha256(message)        — defensive fallback for non-SEP-53 signers
- *   3. SEP-53: sha256(prefix + message) — Freighter / browser wallets
+ * SEP-53 ONLY: sha256("Stellar Signed Message:\n" || message). This must stay
+ * in lockstep with perp-order-gateway::settle_fill_signed, which verifies the
+ * same digest on-chain. Accepting any other scheme here lets an order into the
+ * book whose settlement can never verify on-chain — the matcher then loops
+ * match → sim-fail → rollback on it until the order expires (found by
+ * stress-test scenario A on 2026-07-05).
  */
 export function verifySignedMessage(owner: string, message: string, signature: string): boolean {
   const sig = decodeSignature(signature);
@@ -51,18 +53,11 @@ export function verifySignedMessage(owner: string, message: string, signature: s
   }
 
   const rawBytes = Buffer.from(message, "utf8");
-  const candidates: Array<[string, Buffer]> = [
-    ["raw", rawBytes],
-    ["sha256", hash(rawBytes)],
-    ["sep53", hash(Buffer.concat([Buffer.from(SEP53_PREFIX, "utf8"), rawBytes]))],
-  ];
-
-  for (const [, payload] of candidates) {
-    if (kp.verify(payload, sig)) return true;
-  }
+  const digest = hash(Buffer.concat([Buffer.from(SEP53_PREFIX, "utf8"), rawBytes]));
+  if (kp.verify(digest, sig)) return true;
 
   console.warn(
-    `verifySignedMessage: no scheme matched for ${owner.slice(0, 8)}… ` +
+    `verifySignedMessage: SEP-53 verify failed for ${owner.slice(0, 8)}… ` +
       `(sigLen=${sig.length}, msgLen=${rawBytes.length})`
   );
   return false;

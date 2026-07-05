@@ -8,11 +8,11 @@
  *   SOAK_MINUTES=5 npm run dev:soak   (quick smoke)
  */
 
-import { Keypair, Account, Contract, TransactionBuilder, nativeToScVal, Address, xdr, rpc as sorobanRpc, authorizeEntry, Horizon, Networks, Operation, Asset, BASE_FEE } from "@stellar/stellar-sdk";
+import { Keypair, Account, Contract, TransactionBuilder, nativeToScVal, Address, xdr, rpc as sorobanRpc, authorizeEntry, hash, Horizon, Networks, Operation, Asset, BASE_FEE } from "@stellar/stellar-sdk";
 import { neon } from "@neondatabase/serverless";
 import { execSync } from "child_process";
 import { CONTRACTS, ASSETS, NETWORK } from "../config";
-import { orderSigningMessage } from "../lib/market/signing-message";
+import { orderSettlementMessage, pubkeyHexFromAddress } from "../lib/market/signing-message";
 
 const USDC_ISSUER = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 function pm2Stop(n: string)  { try { execSync(`pm2 stop ${n}`,  { stdio: "pipe" }); } catch {} }
@@ -48,8 +48,14 @@ async function callContract(server: sorobanRpc.Server, kp: Keypair, account: Acc
 }
 
 function signOrder(kp: Keypair, intent: Record<string, unknown>): string {
-  const message = orderSigningMessage(intent as Parameters<typeof orderSigningMessage>[0]);
-  return Buffer.from(kp.sign(Buffer.from(message, "utf8"))).toString("hex");
+  // SEP-53, matching /api/orders validation and settle_fill_signed on-chain.
+  const message = orderSettlementMessage(
+    NETWORK.passphrase,
+    pubkeyHexFromAddress(kp.publicKey()),
+    intent as Parameters<typeof orderSettlementMessage>[2],
+  );
+  const digest = hash(Buffer.concat([Buffer.from("Stellar Signed Message:\n"), Buffer.from(message, "utf8")]));
+  return Buffer.from(kp.sign(digest)).toString("base64");
 }
 
 async function postOrder(kp: Keypair, intent: { market_id: number; is_long: boolean; size: string; limit_price: string; reduce_only: boolean; nonce: string; expiry_ts: string }) {
