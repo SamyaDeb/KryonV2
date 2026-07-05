@@ -1,6 +1,7 @@
 <div align="center">
 
 <img width="1441" height="828" alt="Screenshot 2026-07-04 at 4 04 53 PM" src="https://github.com/user-attachments/assets/56f34d11-46a6-4de6-9a74-67f4030a8fa8" />
+
 # Kryon Protocol
 
 
