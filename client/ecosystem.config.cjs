@@ -56,6 +56,18 @@ module.exports = {
       error_file: "./logs/ws.error.log",
     },
     {
+      name: "kryon-liquidator",
+      script: "npx",
+      args: "tsx --env-file=.env.local scripts/liquidation-keeper.ts",
+      cwd: __dirname,
+      restart_delay: 5000,
+      max_restarts: 20,
+      autorestart: true,
+      log_date_format: "YYYY-MM-DD HH:mm:ss",
+      out_file: "./logs/liquidator.log",
+      error_file: "./logs/liquidator.error.log",
+    },
+    {
       name: "kryon-reconciler",
       script: "npx",
       args: "tsx --env-file=.env.local scripts/settlement-reconciler.ts",

@@ -1,10 +1,23 @@
+# Render blueprint for the Kryon off-chain services.
+#
+# ⚠ CONTRACT ADDRESSES: these must match the CURRENT deployment
+#   (kryon-protocol/infra/deploy/testnet-deployment.toml / redeploy-core.ts
+#   output). Stale addresses here mean services silently run against old,
+#   unpatched contract instances. Re-generate this block on every redeploy.
+#
+# ⚠ PLANS: `starter` (paid, always-on) is the minimum for production — free
+#   instances sleep, and a sleeping reconciler/liquidator strands settlements
+#   and lets underwater positions rot.
+#
+# Secrets (DATABASE_URL, *_SECRET) are set in the Render dashboard, never here.
+
 services:
   - type: web
     name: kryon-ws-server
     runtime: node
     buildCommand: npm install
     startCommand: npx tsx scripts/ws-server.ts
-    plan: free
+    plan: starter
     envVars:
       - key: PORT
         value: "10000"
@@ -21,24 +34,24 @@ services:
       - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
         value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
       - key: NEXT_PUBLIC_CONTRACT_VAULT
-        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+        value: CAULDUKSV4TRBCCFARMCS2D6SY2MJ4GDYUD4YNWTBKRY6WJGWA3HLAJ4
       - key: NEXT_PUBLIC_CONTRACT_ENGINE
-        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+        value: CDGU5MYLXY6N3ABCOTFLL665B7UNIHSBYDDAL22A2KREGLDOHODCJEG5
       - key: NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY
-        value: CA5ZKC7XOKCTQJ6NA5S4SFT54V25YQYUZL66CGUYYAWUXLTCHITNY2O3
+        value: CD77MHYJVQOSD467OSMSBJQSVOYPGONPOQBCJEW7R32UDMF23MBFNM6H
       - key: NEXT_PUBLIC_ASSET_NATIVE_XLM
         value: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
       - key: NEXT_PUBLIC_ASSET_USDC
         value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
       - key: DATABASE_URL
-        sync: false   # set in Render dashboard — do not commit secrets
+        sync: false # set in Render dashboard — do not commit secrets
 
   - type: worker
     name: kryon-oracle-keeper
     runtime: node
     buildCommand: npm install
     startCommand: npx tsx scripts/oracle-keeper.ts
-    plan: free
+    plan: starter
     envVars:
       - key: NODE_ENV
         value: production
@@ -52,15 +65,17 @@ services:
         value: XLM-PERP
       - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
         value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
-      - key: ORACLE_PUBLISHER_SECRET
+      - key: DATABASE_URL
         sync: false
+      - key: ORACLE_PUBLISHER_SECRET
+        sync: false # its own key — NEVER the admin or matcher key
 
   - type: worker
     name: kryon-matcher
     runtime: node
     buildCommand: npm install
     startCommand: npx tsx scripts/matcher-service.ts
-    plan: free
+    plan: starter
     envVars:
       - key: NODE_ENV
         value: production
@@ -73,13 +88,15 @@ services:
       - key: NEXT_PUBLIC_ACTIVE_MARKETS
         value: XLM-PERP
       - key: NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY
-        value: CA5ZKC7XOKCTQJ6NA5S4SFT54V25YQYUZL66CGUYYAWUXLTCHITNY2O3
+        value: CD77MHYJVQOSD467OSMSBJQSVOYPGONPOQBCJEW7R32UDMF23MBFNM6H
       - key: NEXT_PUBLIC_CONTRACT_ENGINE
-        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+        value: CDGU5MYLXY6N3ABCOTFLL665B7UNIHSBYDDAL22A2KREGLDOHODCJEG5
       - key: NEXT_PUBLIC_CONTRACT_VAULT
-        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+        value: CAULDUKSV4TRBCCFARMCS2D6SY2MJ4GDYUD4YNWTBKRY6WJGWA3HLAJ4
+      - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
+        value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
       - key: MATCHER_OPERATOR_SECRET
-        sync: false
+        sync: false # its own key — must equal the gateway operator
       - key: DATABASE_URL
         sync: false
 
@@ -88,7 +105,7 @@ services:
     runtime: node
     buildCommand: npm install
     startCommand: npx tsx scripts/state-indexer.ts
-    plan: free
+    plan: starter
     envVars:
       - key: NODE_ENV
         value: production
@@ -103,9 +120,9 @@ services:
       - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
         value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
       - key: NEXT_PUBLIC_CONTRACT_ENGINE
-        value: CB35YOPWZTH36HQIOYJSW5DTZGX2HEYETDIC334SBZDLSZ7DNKQFE7PL
+        value: CDGU5MYLXY6N3ABCOTFLL665B7UNIHSBYDDAL22A2KREGLDOHODCJEG5
       - key: NEXT_PUBLIC_CONTRACT_VAULT
-        value: CAYLME5COBCEIF4YIKC7PGQNSDZ4QGD55WHZ5J3Y37R33SMM6LJEIYJI
+        value: CAULDUKSV4TRBCCFARMCS2D6SY2MJ4GDYUD4YNWTBKRY6WJGWA3HLAJ4
       - key: DATABASE_URL
         sync: false
 
@@ -114,13 +131,51 @@ services:
     runtime: node
     buildCommand: npm install
     startCommand: npx tsx scripts/settlement-reconciler.ts
-    plan: free
+    plan: starter
     envVars:
       - key: NODE_ENV
         value: production
       - key: SETTLEMENT_JOB_MAX_AGE_MINUTES
         value: "15"
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
       - key: DATABASE_URL
-        sync: false   # set in Render dashboard — do not commit secrets
+        sync: false
       - key: MATCHER_OPERATOR_SECRET
         sync: false
+
+  - type: worker
+    name: kryon-liquidator
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx scripts/liquidation-keeper.ts
+    plan: starter
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_STELLAR_NETWORK
+        value: testnet
+      - key: NEXT_PUBLIC_STELLAR_RPC_URL
+        value: https://soroban-testnet.stellar.org
+      - key: NEXT_PUBLIC_STELLAR_PASSPHRASE
+        value: "Test SDF Network ; September 2015"
+      - key: NEXT_PUBLIC_ACTIVE_MARKETS
+        value: XLM-PERP
+      - key: NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER
+        value: CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP
+      - key: NEXT_PUBLIC_CONTRACT_ENGINE
+        value: CDGU5MYLXY6N3ABCOTFLL665B7UNIHSBYDDAL22A2KREGLDOHODCJEG5
+      - key: NEXT_PUBLIC_CONTRACT_VAULT
+        value: CAULDUKSV4TRBCCFARMCS2D6SY2MJ4GDYUD4YNWTBKRY6WJGWA3HLAJ4
+      - key: NEXT_PUBLIC_CONTRACT_LIQUIDATION
+        value: CCIDLNMNP5AZL6IF5TJ75J3DXXVIONHHFVHLT36HHDCOZI24BK2VNRWK
+      - key: NEXT_PUBLIC_ASSET_USDC
+        value: CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA
+      - key: DATABASE_URL
+        sync: false
+      - key: LIQUIDATOR_SECRET
+        sync: false # its own key — never shared with any other role
