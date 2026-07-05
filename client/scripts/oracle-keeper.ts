@@ -1,7 +1,19 @@
 #!/usr/bin/env tsx
 /**
- * Oracle Keeper — writes live active-market prices from Binance to the
- * perp-oracle-adapter contract.
+ * Oracle Keeper — publishes active-market prices to the perp-oracle-adapter.
+ *
+ * Price integrity model:
+ *   - Every price is the MEDIAN of up to three independent sources
+ *     (Binance, Coinbase, Kraken). At least ORACLE_MIN_SOURCES (default 2)
+ *     must respond or the tick is skipped.
+ *   - If the surviving sources disagree by more than
+ *     ORACLE_MAX_SOURCE_DEVIATION_BPS (default 200 = 2%), the tick is skipped:
+ *     a stale-but-honest price (engine halts on staleness) beats a wrong one.
+ *   - USDC is SOURCED, not assumed at $1. If the sourced price departs the peg
+ *     by more than USDC_DEPEG_HALT_BPS (default 100 = 1%), USDC publication
+ *     halts — collateral valuation goes stale and settlement fail-stops rather
+ *     than valuing depegged collateral at par. On testnet only, a $1 fallback
+ *     is used when the stablecoin sources are unreachable.
  *
  * Requires:
  *   ORACLE_PUBLISHER_SECRET=S... (Stellar secret key of the authorized publisher)
@@ -26,9 +38,13 @@ assertNoPublicSecretLeak();
 
 const PRICE_PRECISION = BigInt("1000000000000000000"); // 1e18
 const PUBLISH_INTERVAL_MS = 8_000; // every 8s — oracle guard max_age is 60s
+const MIN_SOURCES = Number(process.env.ORACLE_MIN_SOURCES ?? "2");
+const MAX_SOURCE_DEVIATION_BPS = Number(process.env.ORACLE_MAX_SOURCE_DEVIATION_BPS ?? "200");
+const USDC_DEPEG_HALT_BPS = Number(process.env.USDC_DEPEG_HALT_BPS ?? "100");
 const ORACLE_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
   symbol: m.symbol,
   oracleSymbol: m.oracleSymbol,
+  baseAsset: m.baseAsset,
   priceSourceSymbol: m.priceSourceSymbol,
 }));
 
@@ -42,17 +58,100 @@ function toU64ScVal(n: bigint): xdr.ScVal {
   return nativeToScVal(n, { type: "u64" });
 }
 
-async function fetchBinancePrice(priceSourceSymbol: string): Promise<{ price: bigint; confidence: bigint; publishTime: bigint }> {
-  const url = `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(priceSourceSymbol)}`;
-  const res = await fetch(url, { cache: "no-store" } as RequestInit);
-  if (!res.ok) throw new Error(`Binance price fetch failed for ${priceSourceSymbol}`);
-  const data = await res.json() as { price: string };
-  const priceFloat = parseFloat(data.price);
-  const price = BigInt(Math.round(priceFloat * Number(PRICE_PRECISION)));
-  // 0.1% confidence interval
-  const confidence = price / 1000n;
-  const publishTime = BigInt(Math.floor(Date.now() / 1000));
-  return { price, confidence, publishTime };
+// ── Independent price sources ────────────────────────────────────────────────
+// Each returns a float USD price or throws. A 5s timeout keeps one slow venue
+// from stalling the whole tick.
+
+async function fetchJson(url: string): Promise<unknown> {
+  const res = await fetch(url, {
+    cache: "no-store",
+    signal: AbortSignal.timeout(5_000),
+  } as RequestInit);
+  if (!res.ok) throw new Error(`${url} -> ${res.status}`);
+  return res.json();
+}
+
+async function binancePrice(binanceSymbol: string): Promise<number> {
+  const data = (await fetchJson(
+    `https://api.binance.com/api/v3/ticker/price?symbol=${encodeURIComponent(binanceSymbol)}`
+  )) as { price: string };
+  const p = parseFloat(data.price);
+  if (!Number.isFinite(p) || p <= 0) throw new Error("binance: bad price");
+  return p;
+}
+
+async function coinbasePrice(baseAsset: string): Promise<number> {
+  const data = (await fetchJson(
+    `https://api.coinbase.com/v2/prices/${encodeURIComponent(baseAsset)}-USD/spot`
+  )) as { data?: { amount?: string } };
+  const p = parseFloat(data.data?.amount ?? "");
+  if (!Number.isFinite(p) || p <= 0) throw new Error("coinbase: bad price");
+  return p;
+}
+
+async function krakenPrice(baseAsset: string): Promise<number> {
+  // Kraken uses XBT for BTC.
+  const pair = `${baseAsset === "BTC" ? "XBT" : baseAsset}USD`;
+  const data = (await fetchJson(
+    `https://api.kraken.com/0/public/Ticker?pair=${encodeURIComponent(pair)}`
+  )) as { error?: string[]; result?: Record<string, { c?: [string, string] }> };
+  if (data.error?.length) throw new Error(`kraken: ${data.error[0]}`);
+  const first = Object.values(data.result ?? {})[0];
+  const p = parseFloat(first?.c?.[0] ?? "");
+  if (!Number.isFinite(p) || p <= 0) throw new Error("kraken: bad price");
+  return p;
+}
+
+interface AggregatedPrice {
+  price: bigint;
+  confidence: bigint;
+  publishTime: bigint;
+  sources: number;
+}
+
+/**
+ * Median across the sources that responded. Returns null (skip the tick) when
+ * fewer than MIN_SOURCES respond or the responders disagree beyond
+ * MAX_SOURCE_DEVIATION_BPS — publishing nothing lets the on-chain staleness
+ * guard fail-stop the protocol instead of feeding it a manipulable price.
+ */
+async function aggregatePrice(
+  label: string,
+  fetchers: Array<() => Promise<number>>
+): Promise<AggregatedPrice | null> {
+  const settled = await Promise.allSettled(fetchers.map((f) => f()));
+  const prices = settled
+    .filter((s): s is PromiseFulfilledResult<number> => s.status === "fulfilled")
+    .map((s) => s.value)
+    .sort((a, b) => a - b);
+
+  if (prices.length < MIN_SOURCES) {
+    const errors = settled
+      .filter((s): s is PromiseRejectedResult => s.status === "rejected")
+      .map((s) => String(s.reason).slice(0, 60));
+    console.error(`\n  ✗ ${label}: only ${prices.length}/${fetchers.length} sources (need ${MIN_SOURCES}): ${errors.join(" | ")}`);
+    return null;
+  }
+
+  const spreadBps = ((prices[prices.length - 1] - prices[0]) / prices[0]) * 10_000;
+  if (spreadBps > MAX_SOURCE_DEVIATION_BPS) {
+    console.error(`\n  ✗ ${label}: source deviation ${spreadBps.toFixed(0)}bps > ${MAX_SOURCE_DEVIATION_BPS}bps — skipping publish (fail-safe)`);
+    return null;
+  }
+
+  const mid = prices.length % 2 === 1
+    ? prices[(prices.length - 1) / 2]
+    : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
+  const price = BigInt(Math.round(mid * Number(PRICE_PRECISION)));
+  // Confidence: at least 0.1%, widened to half the observed source spread.
+  const spreadConfidence = BigInt(Math.round(((prices[prices.length - 1] - prices[0]) / 2) * Number(PRICE_PRECISION)));
+  const confidence = spreadConfidence > price / 1000n ? spreadConfidence : price / 1000n;
+  return {
+    price,
+    confidence,
+    publishTime: BigInt(Math.floor(Date.now() / 1000)),
+    sources: prices.length,
+  };
 }
 
 // ── Main loop ─────────────────────────────────────────────────────────────────
@@ -131,23 +230,58 @@ async function run() {
 
   async function publishMarket(market: (typeof ORACLE_MARKETS)[number]) {
     try {
-      const { price, confidence, publishTime } = await fetchBinancePrice(market.priceSourceSymbol);
-      const priceHuman = Number(price) / Number(PRICE_PRECISION);
-      process.stdout.write(`\r  Publishing ${market.oracleSymbol} $${priceHuman.toFixed(4)} at ${new Date().toISOString().slice(11, 19)}...`);
-      await writePrice(market.oracleSymbol, price, confidence, publishTime);
+      const agg = await aggregatePrice(market.oracleSymbol, [
+        () => binancePrice(market.priceSourceSymbol),
+        () => coinbasePrice(market.baseAsset),
+        () => krakenPrice(market.baseAsset),
+      ]);
+      if (!agg) return; // fail-safe: skip tick, on-chain staleness guard takes over
+      const priceHuman = Number(agg.price) / Number(PRICE_PRECISION);
+      process.stdout.write(`\r  Publishing ${market.oracleSymbol} $${priceHuman.toFixed(4)} (${agg.sources} sources) at ${new Date().toISOString().slice(11, 19)}...`);
+      await writePrice(market.oracleSymbol, agg.price, agg.confidence, agg.publishTime);
     } catch (e) {
       process.stdout.write(` ✗ ${(e as Error).message?.slice(0, 100)}\n`);
     }
   }
 
   // The settlement/collateral asset (USDC) needs a fresh on-chain price so the
-  // vault can value collateral during account_health. It's a $1 stablecoin —
-  // publish the peg every tick (tight confidence) so it never goes stale.
+  // vault can value collateral during account_health. The price is SOURCED —
+  // on a depeg beyond USDC_DEPEG_HALT_BPS we stop publishing, so collateral
+  // valuation goes stale and the protocol fail-stops instead of valuing
+  // depegged USDC at par (deposit-and-drain vector).
   async function publishUsdc() {
     try {
-      const publishTime = BigInt(Math.floor(Date.now() / 1000));
-      process.stdout.write(`\r  Publishing USDC $1.0000 (peg) at ${new Date().toISOString().slice(11, 19)}...`);
-      await writePrice("USDC", PRICE_PRECISION, PRICE_PRECISION / 1000n, publishTime);
+      const agg = await aggregatePrice("USDC", [
+        () => coinbasePrice("USDC"),
+        () => krakenPrice("USDC"),
+      ]);
+
+      let price: bigint;
+      let confidence: bigint;
+      if (agg) {
+        const deviationBps = Number(
+          ((agg.price > PRICE_PRECISION ? agg.price - PRICE_PRECISION : PRICE_PRECISION - agg.price) * 10_000n) /
+            PRICE_PRECISION
+        );
+        if (deviationBps > USDC_DEPEG_HALT_BPS) {
+          console.error(`\n  ✗✗ USDC DEPEG: sourced $${(Number(agg.price) / 1e18).toFixed(4)} is ${deviationBps}bps off peg — HALTING USDC publication (settlement will fail-stop on staleness)`);
+          return;
+        }
+        price = agg.price;
+        confidence = agg.confidence;
+      } else if (NETWORK.name !== "mainnet") {
+        // Testnet-only convenience: stablecoin sources unreachable — publish
+        // the peg so local development is not blocked. NEVER on mainnet.
+        price = PRICE_PRECISION;
+        confidence = PRICE_PRECISION / 1000n;
+      } else {
+        console.error("\n  ✗ USDC: sources unavailable on mainnet — skipping publish (fail-safe)");
+        return;
+      }
+
+      const priceHuman = Number(price) / Number(PRICE_PRECISION);
+      process.stdout.write(`\r  Publishing USDC $${priceHuman.toFixed(4)} at ${new Date().toISOString().slice(11, 19)}...`);
+      await writePrice("USDC", price, confidence, BigInt(Math.floor(Date.now() / 1000)));
     } catch (e) {
       process.stdout.write(` ✗ ${(e as Error).message?.slice(0, 100)}\n`);
     }
