@@ -22,6 +22,28 @@ pub enum DataKey {
     Paused,
 }
 
+/// Grace period after an order's expiry before its Filled/Cancelled entries
+/// may be reclaimed. Orders past expiry can never fill again (validate_order
+/// rejects them), so reclamation after expiry+grace cannot re-enable a replay.
+pub const RECLAIM_GRACE_SECS: u64 = 86_400; // 24h
+
+/// Persistent-entry TTL management (values in ledgers, ~5s each).
+/// Entries are extended to ~30 days whenever written; anything still live
+/// past its order expiry only needs to survive until reclamation.
+const PERSISTENT_TTL_THRESHOLD: u32 = 120_960; // ~7 days
+const PERSISTENT_TTL_EXTEND_TO: u32 = 518_400; // ~30 days
+const INSTANCE_TTL_THRESHOLD: u32 = 120_960; // ~7 days
+const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400; // ~180 days
+
+/// Per-order fill accounting. Carries the order's expiry so the entry can be
+/// safely reclaimed once the order can no longer fill.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FilledEntry {
+    pub amount: i128,
+    pub expiry_ts: u64,
+}
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Order {
@@ -122,12 +144,68 @@ impl PerpOrderGatewayContract {
         Ok(())
     }
 
-    pub fn cancel_order(env: Env, owner: Address, nonce: u64) -> Result<(), CoreError> {
+    /// Cancel an order by nonce. `expiry_ts` must be the order's real expiry —
+    /// it bounds how long the tombstone must be kept before `reclaim_order_state`
+    /// may prune it. Supplying an earlier expiry only shortens the caller's own
+    /// cancel tombstone (cancel requires the owner's auth), never anyone else's.
+    pub fn cancel_order(
+        env: Env,
+        owner: Address,
+        nonce: u64,
+        expiry_ts: u64,
+    ) -> Result<(), CoreError> {
         owner.require_auth();
-        env.storage()
-            .persistent()
-            .set(&DataKey::Cancelled(owner, nonce), &true);
+        let key = DataKey::Cancelled(owner, nonce);
+        env.storage().persistent().set(&key, &expiry_ts);
+        env.storage().persistent().extend_ttl(
+            &key,
+            PERSISTENT_TTL_THRESHOLD,
+            PERSISTENT_TTL_EXTEND_TO,
+        );
         Ok(())
+    }
+
+    /// Permissionless pruning of Filled/Cancelled entries for orders that are
+    /// past `expiry_ts + RECLAIM_GRACE_SECS`. An expired order can never fill
+    /// (validate_order enforces expiry), so removing its entries cannot enable
+    /// replay or overfill. Bounds the gateway's otherwise-unbounded persistent
+    /// storage growth (audit I1). Returns how many entries were removed.
+    pub fn reclaim_order_state(env: Env, owner: Address, nonces: Vec<u64>) -> u32 {
+        let now = env.ledger().timestamp();
+        let mut removed: u32 = 0;
+        for nonce in nonces.iter() {
+            let filled_key = DataKey::Filled(owner.clone(), nonce);
+            if let Some(entry) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, FilledEntry>(&filled_key)
+            {
+                if now > entry.expiry_ts.saturating_add(RECLAIM_GRACE_SECS) {
+                    env.storage().persistent().remove(&filled_key);
+                    removed += 1;
+                }
+            }
+            let cancelled_key = DataKey::Cancelled(owner.clone(), nonce);
+            if let Some(expiry_ts) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u64>(&cancelled_key)
+            {
+                if now > expiry_ts.saturating_add(RECLAIM_GRACE_SECS) {
+                    env.storage().persistent().remove(&cancelled_key);
+                    removed += 1;
+                }
+            }
+        }
+        removed
+    }
+
+    /// Permissionless instance-TTL keepalive. Any keeper may call this to keep
+    /// the contract instance (and its config) from being archived.
+    pub fn extend_instance_ttl(env: Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     }
 
     /// Admin sets the settlement signing domain — the network passphrase bytes.
@@ -301,8 +379,20 @@ fn execute_fill(env: &Env, fill: MatchedFill) -> Result<FillReceipt, CoreError> 
         false,
     )?;
 
-    let maker_filled = add_filled(env, &fill.maker.owner, fill.maker.nonce, fill.fill_size)?;
-    let taker_filled = add_filled(env, &fill.taker.owner, fill.taker.nonce, fill.fill_size)?;
+    let maker_filled = add_filled(
+        env,
+        &fill.maker.owner,
+        fill.maker.nonce,
+        fill.maker.expiry_ts,
+        fill.fill_size,
+    )?;
+    let taker_filled = add_filled(
+        env,
+        &fill.taker.owner,
+        fill.taker.nonce,
+        fill.taker.expiry_ts,
+        fill.fill_size,
+    )?;
 
     Ok(FillReceipt {
         maker_owner: fill.maker.owner,
@@ -599,23 +689,37 @@ fn engine_charge_trade_fee(
 fn filled(env: &Env, owner: &Address, nonce: u64) -> i128 {
     env.storage()
         .persistent()
-        .get(&DataKey::Filled(owner.clone(), nonce))
+        .get::<DataKey, FilledEntry>(&DataKey::Filled(owner.clone(), nonce))
+        .map(|entry| entry.amount)
         .unwrap_or(0)
 }
 
-fn add_filled(env: &Env, owner: &Address, nonce: u64, amount: i128) -> Result<i128, CoreError> {
+fn add_filled(
+    env: &Env,
+    owner: &Address,
+    nonce: u64,
+    expiry_ts: u64,
+    amount: i128,
+) -> Result<i128, CoreError> {
     let next = checked_add(filled(env, owner, nonce), amount)?;
+    let key = DataKey::Filled(owner.clone(), nonce);
+    env.storage().persistent().set(
+        &key,
+        &FilledEntry {
+            amount: next,
+            expiry_ts,
+        },
+    );
     env.storage()
         .persistent()
-        .set(&DataKey::Filled(owner.clone(), nonce), &next);
+        .extend_ttl(&key, PERSISTENT_TTL_THRESHOLD, PERSISTENT_TTL_EXTEND_TO);
     Ok(next)
 }
 
 fn is_cancelled(env: &Env, owner: &Address, nonce: u64) -> bool {
     env.storage()
         .persistent()
-        .get(&DataKey::Cancelled(owner.clone(), nonce))
-        .unwrap_or(false)
+        .has(&DataKey::Cancelled(owner.clone(), nonce))
 }
 
 #[cfg(test)]
@@ -772,9 +876,45 @@ mod tests {
     }
 
     #[test]
+    fn reclaim_prunes_only_expired_entries() {
+        use soroban_sdk::testutils::Ledger;
+
+        let s = setup();
+        let expiry = s.env.ledger().timestamp() + 60;
+        let fill = MatchedFill {
+            maker: order(s.maker.clone(), false, 1, &s.env),
+            taker: order(s.taker.clone(), true, 7, &s.env),
+            fill_size: PRECISION,
+            fill_price: 100 * PRECISION,
+        };
+        s.gateway.settle_fill(&fill);
+        s.gateway.cancel_order(&s.maker, &2, &expiry);
+        assert_eq!(s.gateway.filled(&s.maker, &1), PRECISION);
+        assert!(s.gateway.is_cancelled(&s.maker, &2));
+
+        // Before expiry+grace: nothing may be reclaimed.
+        let nonces = vec![&s.env, 1u64, 2u64];
+        assert_eq!(s.gateway.reclaim_order_state(&s.maker, &nonces), 0);
+        assert_eq!(s.gateway.filled(&s.maker, &1), PRECISION);
+        assert!(s.gateway.is_cancelled(&s.maker, &2));
+
+        // Jump past expiry + grace: both entries become reclaimable.
+        s.env.ledger().with_mut(|l| {
+            l.timestamp = expiry + RECLAIM_GRACE_SECS + 1;
+        });
+        assert_eq!(s.gateway.reclaim_order_state(&s.maker, &nonces), 2);
+        assert_eq!(s.gateway.filled(&s.maker, &1), 0);
+        assert!(!s.gateway.is_cancelled(&s.maker, &2));
+
+        // Replay of the reclaimed order is still impossible: it is expired.
+        assert!(s.gateway.try_settle_fill(&fill).is_err());
+    }
+
+    #[test]
     fn cancelled_order_cannot_fill() {
         let s = setup();
-        s.gateway.cancel_order(&s.maker, &1);
+        s.gateway
+            .cancel_order(&s.maker, &1, &(s.env.ledger().timestamp() + 60));
         let fill = MatchedFill {
             maker: order(s.maker.clone(), false, 1, &s.env),
             taker: order(s.taker.clone(), true, 7, &s.env),

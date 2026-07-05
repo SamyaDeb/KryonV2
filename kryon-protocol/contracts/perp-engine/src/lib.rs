@@ -8,6 +8,16 @@ use protocol_core::{
 use risk_engine::{update_from_imbalance, AccountHealth, FundingConfig, FundingState};
 use soroban_sdk::{contract, contractimpl, contracttype, vec, Address, Env, IntoVal, Symbol, Vec};
 
+/// I2: per-user open-position cap. Must stay well below the risk engine's
+/// 64-entry account_health buffer — hitting that buffer makes health
+/// computation fail, which would block the user's own settlement and
+/// liquidation (a self-DoS / liquidation-evasion vector).
+pub const MAX_POSITIONS_PER_USER: u32 = 16;
+
+/// Instance TTL keepalive bounds (ledgers, ~5s each).
+const INSTANCE_TTL_THRESHOLD: u32 = 120_960; // ~7 days
+const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400; // ~180 days
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
@@ -115,6 +125,14 @@ impl PerpEngineContract {
         env.storage().instance().set(&DataKey::Admin, &next_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
         Ok(())
+    }
+
+    /// Permissionless instance-TTL keepalive — prevents the engine instance
+    /// (markets, funding state keys, config) from being archived.
+    pub fn extend_instance_ttl(env: Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     }
 
     pub fn set_fee_config(env: Env, market_id: u32, config: FeeConfig) -> Result<(), CoreError> {
@@ -280,6 +298,12 @@ impl PerpEngineContract {
         }
 
         let mut positions = load_positions(&env, &user);
+        // I2: hard cap well below the risk-engine's 64-entry account_health
+        // buffer, so a user can never brick their own health check (which
+        // gates settlement and liquidation) by accumulating positions.
+        if positions.len() >= MAX_POSITIONS_PER_USER {
+            return Err(CoreError::TooManyPositions);
+        }
         let funding = funding_state(&env, market_id);
         // For isolated positions, lock initial margin proportional to the position notional
         let position_notional = mul_precision(size, execution_price)?;
@@ -957,6 +981,36 @@ mod tests {
             vault,
             engine,
         }
+    }
+
+    #[test]
+    fn open_position_enforces_per_user_cap() {
+        let s = setup();
+        // Tiny positions so margin never binds: 0.01 BTC @ $100 = $1 notional.
+        let size = PRECISION / 100;
+        for _ in 0..MAX_POSITIONS_PER_USER {
+            s.engine.open_position(
+                &s.user,
+                &1,
+                &size,
+                &true,
+                &(100 * PRECISION),
+                &MarginMode::Cross,
+            );
+        }
+        assert_eq!(s.engine.positions(&s.user).len(), MAX_POSITIONS_PER_USER);
+        let err = s
+            .engine
+            .try_open_position(
+                &s.user,
+                &1,
+                &size,
+                &true,
+                &(100 * PRECISION),
+                &MarginMode::Cross,
+            )
+            .expect_err("17th position must be rejected");
+        assert_eq!(err, Ok(CoreError::TooManyPositions));
     }
 
     #[test]

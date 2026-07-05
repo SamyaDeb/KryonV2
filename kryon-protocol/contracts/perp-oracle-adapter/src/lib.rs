@@ -4,6 +4,10 @@
 use protocol_core::{apply_bps, checked_sub, CoreError, OracleGuard, OracleSnapshot, OracleSource};
 use soroban_sdk::{contract, contractimpl, contracttype, Address, Env, Symbol, Vec};
 
+/// Instance TTL keepalive bounds (ledgers, ~5s each).
+const INSTANCE_TTL_THRESHOLD: u32 = 120_960; // ~7 days
+const INSTANCE_TTL_EXTEND_TO: u32 = 3_110_400; // ~180 days
+
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DataKey {
@@ -96,6 +100,14 @@ impl OracleAdapterContract {
         env.storage().instance().set(&DataKey::Admin, &next_admin);
         env.storage().instance().remove(&DataKey::PendingAdmin);
         Ok(())
+    }
+
+    /// Permissionless instance-TTL keepalive — prevents the oracle instance
+    /// (feed configs, price keys) from being archived.
+    pub fn extend_instance_ttl(env: Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(INSTANCE_TTL_THRESHOLD, INSTANCE_TTL_EXTEND_TO);
     }
 
     pub fn set_quorum_feed(

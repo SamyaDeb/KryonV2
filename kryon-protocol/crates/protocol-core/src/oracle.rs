@@ -1,4 +1,4 @@
-use crate::{checked_sub, CoreError};
+use crate::CoreError;
 use soroban_sdk::{contracttype, Symbol};
 
 #[contracttype]
@@ -45,7 +45,7 @@ impl OracleSnapshot {
             return Err(CoreError::InvalidPrice);
         }
         let max_conf = crate::apply_bps(self.price, guard.max_confidence_bps)?;
-        if checked_sub(self.confidence, max_conf).is_ok() && self.confidence > max_conf {
+        if self.confidence > max_conf {
             return Err(CoreError::OracleConfidenceTooWide);
         }
         Ok(())

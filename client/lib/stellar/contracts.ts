@@ -151,15 +151,18 @@ export async function withdraw(
   );
 }
 
+// expiryTs must be the order's real expiry — the gateway keeps the cancel
+// tombstone until then, after which reclaim_order_state may prune it.
 export async function cancelOrder(
   userAddress: string,
-  nonce: bigint
+  nonce: bigint,
+  expiryTs: bigint
 ): Promise<rpc.Api.GetSuccessfulTransactionResponse> {
   const { u64ToScVal } = await import("./scval");
   return invokeContract(
     CONTRACTS.orderGateway,
     "cancel_order",
-    [addressToScVal(userAddress), u64ToScVal(nonce)],
+    [addressToScVal(userAddress), u64ToScVal(nonce), u64ToScVal(expiryTs)],
     userAddress
   );
 }

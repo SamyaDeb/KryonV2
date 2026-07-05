@@ -30,4 +30,5 @@ pub enum CoreError {
     OracleQuorumNotMet = 24,
     OracleDeviationTooWide = 25,
     DuplicateOracleSource = 26,
+    TooManyPositions = 27,
 }

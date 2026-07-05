@@ -39,7 +39,7 @@ export function OpenOrdersTable({
 
   const makeCancel = (order: (typeof visible)[number]) => async () => {
     try {
-      await cancelOnChain(address, order.nonce);
+      await cancelOnChain(address, order.nonce, order.expiryTs);
       await cancelOrderOnMatcher(address, order.nonce);
       cancelOrder(order.nonce, address);
       toast.success("Order cancelled");
