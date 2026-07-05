@@ -1,0 +1,73 @@
+# Governance Admin-Transfer Ceremony — Testnet Rehearsal (2026-07-05)
+
+Status: **nominate + queue executed; `execute` pending timelock maturity.**
+
+## Governance instance
+
+| Item | Value |
+|---|---|
+| Contract | `CBZT5HUXI42TD55GGB5Y7OZZ72IT5SN64ONOGDYS2PFQCOWIT4XOA6MU` |
+| WASM hash | `c96c7cd36a639ec845faadd211866b8af6eb095c7f05f2d35271893a658d3824` (fixed `execute` — actually invokes target) |
+| Admin | `GA3SSO6D4YL5W6NDCO5V72BN5PHXC3SOBRAFMDSMUOM7OTXY2S6UAUHF` (deployer, rehearsal only) |
+| Guardian | same as admin (rehearsal only — use a separate key on mainnet) |
+| min_delay_secs | 172800 (48 h) |
+
+Deployed + initialized 2026-07-05 ~08:54 UTC. The previous governance instance
+(`CCRI6YJY…TBQ5`) ran the broken WASM whose `execute` never invoked the target;
+it is abandoned and holds no roles.
+
+## Executed steps (2026-07-05)
+
+Operational note: the deployer key is shared with the oracle keeper —
+`pm2 stop kryon-oracle` before, `pm2 start kryon-oracle` after any phase.
+
+1. **Deploy + initialize** (above).
+2. **nominate** — `ADMIN_SECRET=<deployer> npx tsx scripts/transfer-admin-to-governance.ts nominate`
+   - ✓ oracle-adapter `2423c69eefb4…`
+   - ✓ vault `f07474f9c118…`
+   - ✓ engine `0d1119ea297b…`
+   - ✓ order-gateway `2e27b0b7fa25…`
+   - ✗ liquidation — **failed: on-chain admin is the ORIGINAL deployer `GBTL7SKBHYAROO5CYGTQ4ITTEPTUUPIXDFDYZNDNAYQJ4J5XENX4TGDI`, not the current one** (see Blockers)
+   - ✗ insurance — same admin mismatch (verified by simulation; not attempted on-chain)
+3. **queue** — `ADMIN_SECRET=<deployer> npx tsx scripts/transfer-admin-to-governance.ts queue`
+   - All 6 `accept_admin` proposals queued, `eta = 1783415375`:
+     oracle-adapter `8ea2520b0050…`, vault `5a8957509e95…`, engine `17baaf3ddce9…`,
+     order-gateway `81f758269848…`, liquidation `f1f053af7f2a…`, insurance `e4aa61c1c4af…`
+
+## Pending: execute (DO NOT run before ETA)
+
+- **ETA: `1783415375` = 2026-07-07T09:09:35Z** (48 h timelock + 10 min margin; contract-enforced, cannot be shortcut)
+- Command (after `pm2 stop kryon-oracle`):
+
+```bash
+cd client && ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET \
+  npx tsx scripts/transfer-admin-to-governance.ts execute
+# then: pm2 start kryon-oracle
+```
+
+- Expected: oracle-adapter, vault, engine, order-gateway succeed (governance
+  becomes admin). liquidation + insurance **will fail** unless their
+  `nominate_admin` is run first by the original deployer key (below).
+- After execute, verify: direct EOA admin calls on each transferred contract
+  must fail; admin ops go only through governance proposals.
+
+## Blockers / follow-ups
+
+1. **liquidation (`CCIDLNMN…NRWK`) + insurance (`CD45VRVG…54KT`) admin is the
+   original deployer `GBTL7SKB…TGDI`.** The current deployer key cannot
+   nominate on them. Locate that key (it was used for the initial 2026-06
+   deployment; check the original deploy operator's storage), then:
+
+   ```bash
+   stellar contract invoke --id <contract> --source-account <OLD_DEPLOYER_SECRET> \
+     --network testnet -- nominate_admin \
+     --next_admin CBZT5HUXI42TD55GGB5Y7OZZ72IT5SN64ONOGDYS2PFQCOWIT4XOA6MU
+   ```
+
+   The queued proposals then become executable at/after the same ETA. If the
+   key is lost, these two contracts must be redeployed (their state is
+   testnet-only) — treat as a hard prerequisite for the mainnet ceremony:
+   **on mainnet, verify every target's on-chain admin before phase 1.**
+
+2. Mainnet: guardian must be a distinct key (ideally multisig), and the
+   governance admin itself should not be the deployer EOA.
