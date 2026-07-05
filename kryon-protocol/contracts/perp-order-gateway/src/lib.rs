@@ -12,6 +12,9 @@ use soroban_sdk::{
 pub enum DataKey {
     Admin,
     PendingAdmin,
+    /// Fast-path pause authority: may pause settlement instantly; only the
+    /// admin (governance post-transfer) can unpause.
+    Guardian,
     Engine,
     Operator,
     /// Settlement signing domain (the network passphrase bytes). Bound into the
@@ -270,8 +273,30 @@ impl PerpOrderGatewayContract {
 
     // --- H4: Emergency pause ---
 
-    pub fn emergency_pause(env: Env) -> Result<(), CoreError> {
+    pub fn set_guardian(env: Env, guardian: Address) -> Result<(), CoreError> {
         require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Guardian, &guardian);
+        Ok(())
+    }
+
+    pub fn guardian(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Guardian)
+    }
+
+    /// Pause settlement. Callable by the admin OR the guardian — the guardian
+    /// is the fast path once admin sits behind the governance timelock.
+    /// Unpause remains admin-only.
+    pub fn emergency_pause(env: Env, caller: Address) -> Result<(), CoreError> {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(CoreError::InvalidConfig)?;
+        let guardian: Option<Address> = env.storage().instance().get(&DataKey::Guardian);
+        if caller != admin && Some(caller) != guardian {
+            return Err(CoreError::Unauthorized);
+        }
         env.storage().instance().set(&DataKey::Paused, &true);
         Ok(())
     }
@@ -965,9 +990,23 @@ mod tests {
     // --- H4 gateway pause test ---
 
     #[test]
+    fn guardian_can_pause_gateway_but_not_unpause() {
+        let s = setup();
+        let guardian = Address::generate(&s.env);
+        let stranger = Address::generate(&s.env);
+        s.gateway.set_guardian(&guardian);
+        assert!(s.gateway.try_emergency_pause(&stranger).is_err());
+        s.gateway.emergency_pause(&guardian);
+        assert!(s.gateway.is_paused());
+        // Unpause is admin-only; the mocked-admin call restores service.
+        s.gateway.unpause();
+        assert!(!s.gateway.is_paused());
+    }
+
+    #[test]
     fn paused_gateway_rejects_settle_fill() {
         let s = setup();
-        s.gateway.emergency_pause();
+        s.gateway.emergency_pause(&s.admin);
         assert!(s.gateway.is_paused());
         let fill = MatchedFill {
             maker: order(s.maker.clone(), false, 1, &s.env),

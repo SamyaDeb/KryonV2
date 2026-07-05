@@ -23,6 +23,10 @@ const INSTANCE_TTL_EXTEND_TO: u32 = 518_400;
 pub enum DataKey {
     Admin,
     PendingAdmin,
+    /// Fast-path pause authority. Once governance (48h timelock) is the
+    /// admin, an admin-gated emergency_pause is useless in an emergency —
+    /// the guardian can PAUSE instantly, but only the admin can unpause.
+    Guardian,
     Engine,
     Oracle,
     Insurance,
@@ -35,6 +39,10 @@ pub enum DataKey {
     FundingShort(u32),
     UserAssets(Address),
     Paused,
+    /// Per-asset gross-deposit cap for staged launches (0 / absent = uncapped).
+    DepositCap(Address),
+    /// Running sum of deposits minus withdrawals per asset (backs the cap).
+    TotalDeposited(Address),
 }
 
 #[contract]
@@ -96,6 +104,44 @@ impl PerpVaultContract {
         require_admin(&env)?;
         env.storage().instance().set(&DataKey::Engine, &engine);
         Ok(())
+    }
+
+    pub fn admin(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Admin)
+    }
+
+    pub fn set_guardian(env: Env, guardian: Address) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        env.storage().instance().set(&DataKey::Guardian, &guardian);
+        Ok(())
+    }
+
+    pub fn guardian(env: Env) -> Option<Address> {
+        env.storage().instance().get(&DataKey::Guardian)
+    }
+
+    /// Per-asset gross-deposit cap for staged rollouts. cap <= 0 removes it.
+    pub fn set_deposit_cap(env: Env, asset: Address, cap: i128) -> Result<(), CoreError> {
+        require_admin(&env)?;
+        if cap <= 0 {
+            env.storage().instance().remove(&DataKey::DepositCap(asset));
+        } else {
+            env.storage()
+                .instance()
+                .set(&DataKey::DepositCap(asset), &cap);
+        }
+        Ok(())
+    }
+
+    pub fn deposit_cap(env: Env, asset: Address) -> Option<i128> {
+        env.storage().instance().get(&DataKey::DepositCap(asset))
+    }
+
+    pub fn total_deposited(env: Env, asset: Address) -> i128 {
+        env.storage()
+            .instance()
+            .get(&DataKey::TotalDeposited(asset))
+            .unwrap_or(0)
     }
 
     pub fn set_insurance(env: Env, insurance: Address) -> Result<(), CoreError> {
@@ -232,8 +278,19 @@ impl PerpVaultContract {
         if !config.active {
             return Err(CoreError::AssetDisabled);
         }
+        // Staged-launch TVL cap: gross deposits (net of withdrawals) per asset.
+        let total = Self::total_deposited(env.clone(), asset.clone());
+        let next_total = checked_add(total, amount)?;
+        if let Some(cap) = Self::deposit_cap(env.clone(), asset.clone()) {
+            if next_total > cap {
+                return Err(CoreError::DepositCapExceeded);
+            }
+        }
         let vault = env.current_contract_address();
         token::Client::new(&env, &asset).transfer(&user, &vault, &amount);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalDeposited(asset.clone()), &next_total);
         let new_balance = increase_balance(&env, &user, &asset, amount)?;
         record_user_asset(&env, &user, &asset);
         Ok(new_balance)
@@ -279,6 +336,12 @@ impl PerpVaultContract {
         let health = validate_withdrawal(&env, &account, &markets, withdrawal_value)?;
 
         decrease_balance(&env, &user, &asset, amount)?;
+        // Free cap headroom (saturating: pre-upgrade deposits were never counted).
+        let total = Self::total_deposited(env.clone(), asset.clone());
+        env.storage().instance().set(
+            &DataKey::TotalDeposited(asset.clone()),
+            &core::cmp::max(0, total - amount),
+        );
         let vault = env.current_contract_address();
         token::Client::new(&env, &asset).transfer(&vault, &user, &amount);
         Ok(health)
@@ -308,8 +371,21 @@ impl PerpVaultContract {
 
     // --- H4: Emergency pause ---
 
-    pub fn emergency_pause(env: Env) -> Result<(), CoreError> {
-        require_admin(&env)?;
+    /// Pause deposits/withdrawals/PnL. Callable by the admin OR the guardian —
+    /// the guardian is the fast path once admin sits behind the governance
+    /// timelock. Unpause remains admin-only, so a compromised guardian can
+    /// halt the system but never restart it.
+    pub fn emergency_pause(env: Env, caller: Address) -> Result<(), CoreError> {
+        caller.require_auth();
+        let admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(CoreError::InvalidConfig)?;
+        let guardian: Option<Address> = env.storage().instance().get(&DataKey::Guardian);
+        if caller != admin && Some(caller) != guardian {
+            return Err(CoreError::Unauthorized);
+        }
         env.storage().instance().set(&DataKey::Paused, &true);
         Ok(())
     }
@@ -792,7 +868,8 @@ mod tests {
     fn paused_vault_rejects_deposit() {
         let env = Env::default();
         let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
-        vault.emergency_pause();
+        let admin = vault.admin().unwrap();
+        vault.emergency_pause(&admin);
         assert!(vault.is_paused());
         let result = vault.try_deposit(&user, &settlement_asset, &(100 * PRECISION));
         assert!(match result {
@@ -807,7 +884,8 @@ mod tests {
         let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
         // deposit before pause
         vault.deposit(&user, &settlement_asset, &(100 * PRECISION));
-        vault.emergency_pause();
+        let admin = vault.admin().unwrap();
+        vault.emergency_pause(&admin);
         let result = vault.try_withdraw(&user, &settlement_asset, &(50 * PRECISION));
         assert!(match result {
             Ok(inner) => inner.is_err(),
@@ -819,7 +897,8 @@ mod tests {
     fn unpause_restores_deposit() {
         let env = Env::default();
         let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
-        vault.emergency_pause();
+        let admin = vault.admin().unwrap();
+        vault.emergency_pause(&admin);
         assert!(vault.is_paused());
         vault.unpause();
         assert!(!vault.is_paused());
@@ -828,6 +907,63 @@ mod tests {
             vault.deposit(&user, &settlement_asset, &(100 * PRECISION)),
             100 * PRECISION
         );
+    }
+
+    // --- Guardian fast-path pause ---
+
+    #[test]
+    fn guardian_can_pause_but_not_unpause_and_stranger_cannot_pause() {
+        let env = Env::default();
+        let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
+        let guardian = Address::generate(&env);
+        let stranger = Address::generate(&env);
+        vault.set_guardian(&guardian);
+
+        // A random address may not pause even with its auth mocked.
+        assert!(vault.try_emergency_pause(&stranger).is_err());
+        assert!(!vault.is_paused());
+
+        // The guardian pauses instantly.
+        vault.emergency_pause(&guardian);
+        assert!(vault.is_paused());
+        assert!(vault
+            .try_deposit(&user, &settlement_asset, &(10 * PRECISION))
+            .is_err());
+
+        // Only the admin can unpause (guardian compromise cannot restart).
+        vault.unpause();
+        assert!(!vault.is_paused());
+    }
+
+    // --- Staged-launch deposit cap ---
+
+    #[test]
+    fn deposit_cap_blocks_over_cap_and_withdraw_frees_headroom() {
+        let env = Env::default();
+        let (user, _engine, _publisher, settlement_asset, _oracle_id, vault) = setup(&env);
+
+        vault.set_deposit_cap(&settlement_asset, &(100 * PRECISION));
+        assert_eq!(vault.deposit_cap(&settlement_asset), Some(100 * PRECISION));
+
+        vault.deposit(&user, &settlement_asset, &(80 * PRECISION));
+        assert_eq!(vault.total_deposited(&settlement_asset), 80 * PRECISION);
+
+        // 80 + 30 > 100 → rejected; headroom-sized deposit passes.
+        assert!(vault
+            .try_deposit(&user, &settlement_asset, &(30 * PRECISION))
+            .is_err());
+        vault.deposit(&user, &settlement_asset, &(20 * PRECISION));
+        assert_eq!(vault.total_deposited(&settlement_asset), 100 * PRECISION);
+
+        // Withdrawals free capacity.
+        vault.withdraw(&user, &settlement_asset, &(50 * PRECISION));
+        assert_eq!(vault.total_deposited(&settlement_asset), 50 * PRECISION);
+        vault.deposit(&user, &settlement_asset, &(50 * PRECISION));
+
+        // Removing the cap lifts the limit entirely.
+        vault.set_deposit_cap(&settlement_asset, &0);
+        assert_eq!(vault.deposit_cap(&settlement_asset), None);
+        vault.deposit(&user, &settlement_asset, &(500 * PRECISION));
     }
 
     // --- H6 multi-collateral test ---

@@ -31,4 +31,5 @@ pub enum CoreError {
     OracleDeviationTooWide = 25,
     DuplicateOracleSource = 26,
     TooManyPositions = 27,
+    DepositCapExceeded = 28,
 }
