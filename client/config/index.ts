@@ -57,7 +57,7 @@ export const MARKETS: Record<string, MarketConfig> = {
     priceSourceSymbol: "XLMUSDT",
     settlementAsset: ASSETS.usdc,
     tvSymbol: "COINBASE:XLMUSD",
-    maxLeverageBps: 2000000, // 200x
+    maxLeverageBps: 100000, // 10x — 1/initialMarginBps; matches on-chain engine max_leverage_bps
     initialMarginBps: 1000,  // 10%
     maintenanceMarginBps: 500, // 5%
     liquidationFeeBps: 50,
@@ -72,7 +72,7 @@ export const MARKETS: Record<string, MarketConfig> = {
     priceSourceSymbol: "BTCUSDT",
     settlementAsset: ASSETS.usdc,
     tvSymbol: "COINBASE:BTCUSD",
-    maxLeverageBps: 2000000, // 200x
+    maxLeverageBps: 500000, // 50x — 1/initialMarginBps
     initialMarginBps: 200,   // 2%
     maintenanceMarginBps: 100, // 1%
     liquidationFeeBps: 25,
@@ -87,7 +87,7 @@ export const MARKETS: Record<string, MarketConfig> = {
     priceSourceSymbol: "ETHUSDT",
     settlementAsset: ASSETS.usdc,
     tvSymbol: "COINBASE:ETHUSD",
-    maxLeverageBps: 2000000, // 200x
+    maxLeverageBps: 200000, // 20x — 1/initialMarginBps
     initialMarginBps: 500,   // 5%
     maintenanceMarginBps: 250, // 2.5%
     liquidationFeeBps: 35,

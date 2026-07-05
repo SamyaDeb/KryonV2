@@ -7,7 +7,6 @@ import { ACTIVE_MARKETS, MarketConfig } from "@/config";
 import { getOpenInterest } from "@/lib/stellar/contracts";
 import { formatAmount, formatChangePercent, priceToHuman } from "@/lib/format";
 import { useMarketStore } from "@/stores/market";
-import { useTradeSettings } from "@/stores/settings";
 import { XlmLogo } from "@/components/common/AssetLogos";
 
 const CaretIcon = () => (
@@ -23,7 +22,6 @@ export function MarketHeader({ market }: { market: MarketConfig }) {
   const stats = useMarketStore((s) => s.marketStats[market.marketId]);
   const ticker24h = useMarketStore((s) => s.ticker24h[market.marketId]);
   const changePct = useMarketStore((s) => s.priceChangePct[market.marketId]);
-  const degenMode = useTradeSettings((s) => s.degenMode);
 
   const { data: oi } = useQuery({
     queryKey: ["oi", market.marketId],
@@ -50,7 +48,7 @@ export function MarketHeader({ market }: { market: MarketConfig }) {
   const baseSymbol = market.symbol.replace("-PERP", "");
   const activeMarkets = Object.values(ACTIVE_MARKETS);
   const canSwitchMarkets = activeMarkets.length > 1;
-  const leverageDisplay = degenMode ? 500 : Math.round(market.maxLeverageBps / 10_000);
+  const leverageDisplay = Math.round(market.maxLeverageBps / 10_000);
 
   const changeDisplay = changePct !== undefined
     ? formatChangePercent(changePct)
@@ -91,11 +89,7 @@ export function MarketHeader({ market }: { market: MarketConfig }) {
           ) : (
             <MarketPairLabel baseSymbol={baseSymbol} quoteAsset={market.quoteAsset} />
           )}
-          <span className={`rounded-[5px] border px-2 py-[2px] font-mono text-[11.5px] font-semibold ${
-            degenMode
-              ? "border-[#e2a9f1]/50 bg-[#e2a9f1]/15 text-[#e2a9f1]"
-              : "border-[#334155] bg-[#212128] text-[#f5f5f5]"
-          }`}>
+          <span className="rounded-[5px] border px-2 py-[2px] font-mono text-[11.5px] font-semibold border-[#334155] bg-[#212128] text-[#f5f5f5]">
             {leverageDisplay}X
           </span>
         </div>

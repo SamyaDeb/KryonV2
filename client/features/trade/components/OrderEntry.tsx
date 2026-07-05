@@ -141,9 +141,11 @@ export function OrderEntry({
   const [loading, setLoading] = useState(false);
   const [fastPoll, setFastPoll] = useState(false);
 
-  const maxLev = degenMode ? 500 : Math.round(market.maxLeverageBps / 10000);
+  // Leverage cap always follows the market config (which mirrors the on-chain
+  // engine limits) — degen mode must not advertise leverage the chain rejects.
+  const maxLev = Math.round(market.maxLeverageBps / 10000);
   const effectiveLeverage = Math.min(leverage, maxLev);
-  const levMarks = (degenMode ? [1, 25, 50, 100, 200, 500] : [1, 10, 25, 50, 100, maxLev]).filter(
+  const levMarks = [1, 2, 5, 10, 25, 50, maxLev].filter(
     (v, i, arr) => v >= 1 && v <= maxLev && arr.indexOf(v) === i
   );
 
@@ -365,6 +367,9 @@ export function OrderEntry({
   const valCls = "text-[#737373] font-mono";
   const showMarginMode = false;
   const showTpSl = false;
+  // Degen mode: kept in code but hidden for v1 — its old 500x cap exceeded the
+  // on-chain max leverage, so the toggle only misled users.
+  const showDegenMode = false;
 
   return (
     <div className="relative flex flex-col">
@@ -498,6 +503,7 @@ export function OrderEntry({
         </div>
 
         {/* Degen mode */}
+        {showDegenMode && (
         <div className="flex items-center justify-between px-1">
           <span className="text-[12px] font-semibold text-[#f5f5f5]">Degen Mode</span>
           <button
@@ -522,6 +528,7 @@ export function OrderEntry({
             />
           </button>
         </div>
+        )}
 
         {/* Order leverage — inline slider */}
         <div className="px-[2px] py-[2px]">
