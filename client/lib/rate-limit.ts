@@ -53,12 +53,24 @@ function localRateLimit(key: string, limit: number): boolean {
 export async function rateLimit(key: string, limit: number): Promise<boolean> {
   const distributed = await distributedRateLimit(key, limit).catch(() => false);
   if (distributed !== null) return distributed;
+  // No distributed limiter configured. The in-memory fallback is per-instance
+  // (per-isolate on serverless platforms), so under horizontal scale it is
+  // effectively no limit at all. In production that is not acceptable for
+  // state-mutating routes — fail closed and surface the misconfiguration.
+  if (process.env.NODE_ENV === "production") {
+    console.error("rate-limit: UPSTASH_REDIS_REST_URL/TOKEN not configured in production — denying request");
+    return false;
+  }
   return localRateLimit(key, limit);
 }
 
 export function requestKey(req: Request, owner: string): string {
+  // CF-Connecting-IP is set by Cloudflare and cannot be spoofed by the client
+  // (Cloudflare strips inbound values). x-forwarded-for is client-spoofable
+  // and only a best-effort fallback for non-Cloudflare deployments.
+  const cfIp = req.headers.get("cf-connecting-ip")?.trim();
   const forwarded = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
-  const ip = forwarded || req.headers.get("x-real-ip") || "unknown";
+  const ip = cfIp || forwarded || req.headers.get("x-real-ip") || "unknown";
   return `${owner}:${ip}`;
 }
 

@@ -132,7 +132,9 @@ async function resubmitJob(
   server: sorobanRpc.Server,
   job: JobRow,
 ) {
-  const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET ?? process.env.ORACLE_PUBLISHER_SECRET;
+  // Key separation: settlement uses ONLY the dedicated operator key. No
+  // fallback to the oracle key — one key must never serve two roles.
+  const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET;
   if (!feePayerSecret) return;
 
   const payload = parsePayload(job.unsignedXdr);

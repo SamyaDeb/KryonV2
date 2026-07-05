@@ -32,11 +32,13 @@ export async function POST(req: NextRequest) {
   if (typeof body.signature !== "string" || body.signature.length > 256) {
     return NextResponse.json({ ok: false, error: "Missing cancel signature" }, { status: 400 });
   }
-  if (!verifySignedMessage(owner, cancelSigningMessage(owner, nonce), body.signature)) {
-    return NextResponse.json({ ok: false, error: "Invalid cancel signature" }, { status: 401 });
-  }
+  // Rate-limit before signature verification so junk requests don't get free
+  // ed25519-verify CPU.
   if (!(await rateLimit(requestKey(req, owner), 60))) {
     return NextResponse.json({ ok: false, error: "Too many cancel requests" }, { status: 429 });
+  }
+  if (!verifySignedMessage(owner, cancelSigningMessage(owner, nonce), body.signature)) {
+    return NextResponse.json({ ok: false, error: "Invalid cancel signature" }, { status: 401 });
   }
 
   try {

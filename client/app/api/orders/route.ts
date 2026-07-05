@@ -17,6 +17,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: "Invalid JSON body" }, { status: 400 });
   }
 
+  // Rate-limit FIRST, before signature verification — otherwise an attacker
+  // gets free ed25519-verify CPU on every junk request. The owner field is
+  // taken as-is for the limiter key; validateOrderIntent re-checks it fully.
+  const claimedOwner = typeof (body as Record<string, unknown>)?.owner === "string"
+    ? ((body as Record<string, unknown>).owner as string).slice(0, 64)
+    : "invalid";
+  if (!(await rateLimit(requestKey(req, claimedOwner), 30))) {
+    return NextResponse.json({ ok: false, error: "Too many order requests" }, { status: 429 });
+  }
+
   // Validate before touching the DB — keeps malformed/abusive intents out of
   // the orderbook and the matcher.
   const result = validateOrderIntent(body);
@@ -27,9 +37,6 @@ export async function POST(req: NextRequest) {
   const sig = typeof (body as Record<string, unknown>).signature === "string"
     ? (body as Record<string, unknown>).signature as string
     : null;
-  if (!(await rateLimit(requestKey(req, o.owner), 30))) {
-    return NextResponse.json({ ok: false, error: "Too many order requests" }, { status: 429 });
-  }
 
   try {
     const sql = db();

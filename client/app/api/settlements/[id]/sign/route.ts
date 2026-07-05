@@ -124,7 +124,9 @@ export async function POST(
   // other transactions since then, advancing their sequence and making the stored XDR invalid.
   try {
     const server = new sorobanRpc.Server(NETWORK.rpcUrl);
-    const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET ?? process.env.ORACLE_PUBLISHER_SECRET;
+    // Key separation: the settlement fee payer is ONLY the matcher operator.
+    // Never fall back to the oracle key — one key must never serve two roles.
+    const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET;
     if (!feePayerSecret) {
       return NextResponse.json({ ok: false, error: "Missing matcher fee-payer secret" }, { status: 500 });
     }
@@ -162,42 +164,15 @@ export async function POST(
       throw new Error(send.errorResult?.toXDR("base64") ?? "submit error");
     }
 
-    // Persist the hash immediately so a reconciliation worker can resolve the job
-    // even if this request times out before confirmation. Status stays SUBMITTED.
+    // Persist the hash and return immediately. The settlement-reconciler owns
+    // confirmation: it polls Horizon for SUBMITTED jobs, marks them
+    // CONFIRMED/FAILED, and updates the Fill row's txHash/ledger. Holding this
+    // request open for up to 30s only burned serverless wall-clock and added a
+    // second, racing confirmation writer.
     await sql`
       UPDATE "TxJob" SET "submittedHash" = ${send.hash}, "updatedAt" = NOW() WHERE id = ${id}
     `;
-
-    for (let i = 0; i < 30; i++) {
-      await new Promise((r) => setTimeout(r, 1000));
-      const poll = await server.getTransaction(send.hash);
-      if (poll.status === "SUCCESS") {
-        const ledger = Number("ledger" in poll ? poll.ledger : 0);
-        await sql`
-          UPDATE "TxJob"
-          SET status = 'CONFIRMED', "submittedHash" = ${send.hash}, "updatedAt" = NOW()
-          WHERE id = ${id}
-        `;
-        if (data.pendingTxHash) {
-          await sql`
-            UPDATE "Fill"
-            SET "txHash" = ${send.hash}, ledger = ${ledger}
-            WHERE network = ${NETWORK.name}
-              AND "txHash" = ${data.pendingTxHash}
-              AND maker = ${data.makerAddress}
-              AND taker = ${data.takerAddress}
-              AND "makerNonce" = ${data.makerNonce ?? ""}
-              AND "takerNonce" = ${data.takerNonce ?? ""}
-          `;
-        }
-        return NextResponse.json({ ok: true, status: "settled", hash: send.hash });
-      }
-      if (poll.status === "FAILED") {
-        await sql`UPDATE "TxJob" SET status = 'FAILED', "updatedAt" = NOW() WHERE id = ${id}`;
-        return NextResponse.json({ ok: false, error: "tx failed on-chain" }, { status: 500 });
-      }
-    }
-    return NextResponse.json({ ok: false, error: "timeout" }, { status: 504 });
+    return NextResponse.json({ ok: true, status: "submitted", hash: send.hash });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("Settlement submission error:", msg);

@@ -325,9 +325,9 @@ async function rollbackFill(sql: Sql, match: MatchResult): Promise<void> {
 // connected clients sign via /api/settlements/[id]/sign.
 
 async function executeSettlement(sql: Sql, match: MatchResult): Promise<boolean> {
-  // Use the dedicated operator key (decoupled from the oracle keeper to avoid
-  // sequence-number collisions). Falls back to the oracle key if unset.
-  const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET ?? process.env.ORACLE_PUBLISHER_SECRET;
+  // Key separation: settlement uses ONLY the dedicated operator key. No
+  // fallback to the oracle key — one key must never serve two roles.
+  const feePayerSecret = process.env.MATCHER_OPERATOR_SECRET;
   if (!feePayerSecret) return false;
 
   const fillHash = pseudoTxHash(match.maker, match.taker, match.fillSize);
