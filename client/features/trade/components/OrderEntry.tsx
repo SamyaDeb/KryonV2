@@ -104,6 +104,7 @@ export function OrderEntry({
     useWalletStore();
   const queryClient = useQueryClient();
   const addOrder = useLocalOrders((s) => s.addOrder);
+  const localOrders = useLocalOrders((s) => s.orders);
   const rawMarkPrice = useMarketStore((s) => s.markPrices[market.marketId]);
   const book = useMarketStore((s) => s.orderBooks[market.marketId]);
   const selectedPrice = useMarketStore((s) => s.selectedPrice[market.marketId]);
@@ -279,6 +280,22 @@ export function OrderEntry({
     if (showTpSl && tpsl && !tpPrice && !slPrice && !tpGain && !slLoss) {
       toast.error("Enter a take-profit or stop-loss value");
       return;
+    }
+
+    // Self-trade heads-up: the matcher never matches two orders from the same
+    // wallet, so an order that only crosses the user's own resting order will
+    // sit unfilled until a different wallet takes the other side.
+    const wouldSelfCross = localOrders.some((o) => {
+      if (o.status !== "pending" || o.owner !== address || o.marketId !== market.marketId) return false;
+      if (o.isLong === (side === "buy")) return false;
+      if (orderType === "market") return true; // market orders cross any resting price
+      const restingPrice = priceToHuman(o.limitPrice);
+      return side === "buy" ? limitPriceNum >= restingPrice : limitPriceNum <= restingPrice;
+    });
+    if (wouldSelfCross) {
+      toast.warning(
+        "This order crosses your own resting order. Self-matches are skipped — it will only fill against another wallet."
+      );
     }
 
     // Client-side margin check — prevents orders that would fail on-chain settlement

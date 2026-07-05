@@ -28,21 +28,28 @@ export function AccountBar() {
 
   if (!connected || !address) return null;
 
+  // Free collateral = deposited balance − margin locked by open positions ± unrealized PnL.
+  // Falls back to the raw vault balance before any position exists.
+  const available = health?.freeCollateral ?? balance;
+
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-[11px] border-b border-[#334155]">
       <div className="flex items-center gap-5">
         <Stat
-          label="Balance"
+          label="Deposited"
           value={balance !== undefined ? formatUsd(balance) : "—"}
           icon={<UsdcLogo size={12} />}
         />
-        {health && health.usedMargin > 0n && (
-          <Stat
-            label="Used Margin"
-            value={`$${amountToHuman(health.usedMargin).toFixed(2)}`}
-            icon={<UsdcLogo size={12} />}
-          />
-        )}
+        <Stat
+          label="Available"
+          value={available !== undefined ? formatUsd(available) : "—"}
+          icon={<UsdcLogo size={12} />}
+        />
+        <Stat
+          label="Used Margin"
+          value={health !== undefined && health !== null ? `$${amountToHuman(health.usedMargin).toFixed(2)}` : "—"}
+          icon={<UsdcLogo size={12} />}
+        />
       </div>
       <DepositWithdrawDialog />
     </div>
