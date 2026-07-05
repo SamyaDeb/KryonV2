@@ -38,13 +38,16 @@ const RPC_URL   = "https://soroban-testnet.stellar.org";
 const NETWORK   = "Test SDF Network ; September 2015";
 const FEE       = "2000000"; // 0.2 XLM — higher for complex ops
 
-// WASMs on-chain (re-uploaded 2026-06-06 with audit fixes: H1-H8, C1, C2, M1)
+// WASMs on-chain (re-uploaded 2026-07-05 with I1 nonce reclamation, I2
+// position cap, TTL keepalives; cancel_order now takes expiry_ts).
+// Governance WASM (real execute + guardian veto) also uploaded:
+//   c96c7cd36a639ec845faadd211866b8af6eb095c7f05f2d35271893a658d3824
 const WASM: Record<string, string> = {
-  vault:         "7f6adceb81645e03ffa4c1db5c6fff7d4470688ed2abff54535d4458dbdea52d",
-  engine:        "4031914ead31d2e4c1b78a2b646601ad470c0445344c1813b7b939c64bfe883a",
-  orderGateway:  "b93c34aff95308818d67858c8f9dd12b3d4a4117d3a5dd7a82ae042fa85f13be", // C2: settle_fill_signed
+  vault:         "4288a4cf85c149efae9e5bc9b8881e13420f2aa5b880e7c1c1ca857e7c9f2890",
+  engine:        "72cd047b68d225a74fbbb51074e202c58184d4d7661e8fab517c9670a95e3c8f",
+  orderGateway:  "ea625123ef3c35cfd66e7ebe2b17230a8a96313e2f9946775e2346d973634b88",
 
-  risk:          "c0dc9f73b67588b55aa3aca4735775dc2fbfb29d7a3681f2634b8221522ef251",
+  risk:          "c0dc9f73b67588b55aa3aca4735775dc2fbfb29d7a3681f2634b8221522ef251", // unchanged
 };
 
 // Existing contracts we keep (already controlled by our key or unchanged)
@@ -311,9 +314,11 @@ async function main() {
   ]);
 
   // EngineMarketConfig: { market: MarketConfig, max_execution_deviation_bps: u32 }
+  // 1000 bps (10%) on testnet: 500 caused PriceOutsideBand when the oracle
+  // drifted while a limit order rested. Tighten for mainnet after stress tests.
   const engineMarketConfig = xdr.ScVal.scvMap([
     new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol("market"),                       val: coreMarketConfig }),
-    new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol("max_execution_deviation_bps"),  val: u32(500) }),
+    new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol("max_execution_deviation_bps"),  val: u32(1000) }),
   ]);
 
   account = await callContract(server, kp, account, engineId, "set_market",

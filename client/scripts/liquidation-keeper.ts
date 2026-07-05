@@ -32,6 +32,7 @@ import {
   xdr,
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
+import { StrKey } from "@stellar/stellar-sdk";
 import { neon, type NeonQueryFunction } from "@neondatabase/serverless";
 import { ACTIVE_MARKETS, ASSETS, CONTRACTS, NETWORK } from "../config";
 import { assertNoPublicSecretLeak, assertRequiredSecrets } from "../lib/secrets-check";
@@ -303,13 +304,19 @@ async function run() {
 
       let flagged = 0;
       for (const { address } of rows) {
-        const health = await accountHealth(server, address);
-        if (!health?.liquidatable) continue;
-        flagged++;
-        console.log(
-          `[${new Date().toISOString().slice(11, 19)}] liquidatable: ${address.slice(0, 8)} equity=${health.equity}`
-        );
-        await liquidateAccount(server, liquidatorKp, address);
+        // Skip malformed/non-account rows; one bad address must not kill the scan.
+        if (!StrKey.isValidEd25519PublicKey(address)) continue;
+        try {
+          const health = await accountHealth(server, address);
+          if (!health?.liquidatable) continue;
+          flagged++;
+          console.log(
+            `[${new Date().toISOString().slice(11, 19)}] liquidatable: ${address.slice(0, 8)} equity=${health.equity}`
+          );
+          await liquidateAccount(server, liquidatorKp, address);
+        } catch (e) {
+          console.error(`  account ${address.slice(0, 8)}: ${(e as Error).message?.slice(0, 100)}`);
+        }
       }
       if (flagged === 0) {
         process.stdout.write(
