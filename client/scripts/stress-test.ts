@@ -186,6 +186,16 @@ async function insuranceBalance(): Promise<{ balance: bigint; badDebt: bigint }>
   };
 }
 
+// Actual USDC token balance held BY an address (SAC balance), as opposed to the
+// vault's INTERNAL accounting balance. The true solvency invariant is over real
+// token reserves, not internal balances: a liquidation moves a victim's realized
+// loss into vault reserves (backing the counterparty's still-open position) and
+// pays the liquidator reward out of insurance into the liquidator's WALLET — so
+// summing internal vault balances (which ignore both) shows a phantom "drift".
+async function walletUsdc(addr: string): Promise<bigint> {
+  return readWithRetry(ASSETS.usdc, "balance", [new Address(addr).toScVal()]);
+}
+
 // null = read failed (unknown state) — callers must NOT treat it as "no positions".
 async function positionsOf(user: string): Promise<Array<Record<string, unknown>> | null> {
   const res = await simulateRead(CONTRACTS.engine, "positions", [new Address(user).toScVal()]);
@@ -399,16 +409,22 @@ async function scenarioLiquidation(): Promise<ScenarioResult> {
   if (!posBefore?.length) return { name: "b-liquidation", pass: false, notes: ["open: settled but no on-chain position found"] };
   notes.push(`opened position: ${sizeXlm / AMOUNT_PRECISION} XLM long @ $${priceHuman.toFixed(4)} on 5 USDC margin`);
 
-  // Snapshot balances for the conservation check
+  // Snapshot TOKEN RESERVES for the conservation check. Solvency = real USDC
+  // tokens held by {vault contract, insurance contract, liquidator wallet} is
+  // conserved: liquidation only moves tokens between these buckets (victim loss
+  // → vault reserves; reward → insurance → liquidator wallet). No external
+  // deposit/withdraw happens in the pre→post window.
   const liqPub = process.env.LIQUIDATOR_SECRET
     ? Keypair.fromSecret(process.env.LIQUIDATOR_SECRET).publicKey()
     : null;
-  const pre = {
-    w: await vaultBalance(wKp.publicKey()),
-    maker: await vaultBalance(makerKp.publicKey()),
-    liquidator: liqPub ? await vaultBalance(liqPub) : 0n,
+  const snapshot = async () => ({
+    vaultReserves: await walletUsdc(CONTRACTS.vault),
+    insuranceReserves: await walletUsdc(CONTRACTS.insurance),
+    liquidatorWallet: liqPub ? await walletUsdc(liqPub) : 0n,
+    wBalance: await vaultBalance(wKp.publicKey()),
     insurance: await insuranceBalance(),
-  };
+  });
+  const pre = await snapshot();
 
   // Push the mark down 10% with a synthetic publish (TESTNET ONLY).
   pm2Stop("kryon-oracle");
@@ -448,26 +464,22 @@ async function scenarioLiquidation(): Promise<ScenarioResult> {
   }
   await sleep(15_000); // real prices resume
 
-  // Conservation: value moved between W, maker, insurance, liquidator — but the
-  // sum across them (plus recorded bad debt) must not change.
-  const post = {
-    w: await vaultBalance(wKp.publicKey()),
-    maker: await vaultBalance(makerKp.publicKey()),
-    liquidator: liqPub ? await vaultBalance(liqPub) : 0n,
-    insurance: await insuranceBalance(),
-  };
+  const post = await snapshot();
 
-  const preSum = pre.w + pre.maker + pre.liquidator + pre.insurance.balance;
-  const postSum = post.w + post.maker + post.liquidator + post.insurance.balance;
-  const drift = postSum - preSum;
-  notes.push(`balances (USDC) W: ${fmtUsdc(pre.w)}→${fmtUsdc(post.w)}, maker: ${fmtUsdc(pre.maker)}→${fmtUsdc(post.maker)}, insurance: ${fmtUsdc(pre.insurance.balance)}→${fmtUsdc(post.insurance.balance)}, liquidator: ${fmtUsdc(pre.liquidator)}→${fmtUsdc(post.liquidator)}`);
-  notes.push(`bad debt: ${fmtUsdc(pre.insurance.badDebt)}→${fmtUsdc(post.insurance.badDebt)}`);
-  notes.push(`closed-system drift (post−pre, should be ≤0 and small; fees may exit): ${fmtUsdc(drift)} USDC`);
+  const preReserves = pre.vaultReserves + pre.insuranceReserves + pre.liquidatorWallet;
+  const postReserves = post.vaultReserves + post.insuranceReserves + post.liquidatorWallet;
+  const drift = postReserves - preReserves;
 
-  // Note: maker keeps an open short with unrealized PnL — its vault balance
-  // reflects realized flows only, so drift here measures realized conservation.
-  const pass = drift <= 0n && -drift < 1n * AMOUNT_PRECISION; // ≤1 USDC unexplained outflow
-  if (!pass) notes.push("!! conservation drift exceeds 1 USDC — investigate before mainnet");
+  notes.push(`victim W internal balance: ${fmtUsdc(pre.wBalance)}→${fmtUsdc(post.wBalance)} USDC (realized liquidation loss)`);
+  notes.push(`token reserves — vault: ${fmtUsdc(pre.vaultReserves)}→${fmtUsdc(post.vaultReserves)}, insurance: ${fmtUsdc(pre.insuranceReserves)}→${fmtUsdc(post.insuranceReserves)}, liquidator wallet: ${fmtUsdc(pre.liquidatorWallet)}→${fmtUsdc(post.liquidatorWallet)}`);
+  notes.push(`insurance internal: ${fmtUsdc(pre.insurance.balance)}→${fmtUsdc(post.insurance.balance)}, bad debt: ${fmtUsdc(pre.insurance.badDebt)}→${fmtUsdc(post.insurance.badDebt)}`);
+  notes.push(`token-reserve drift (should be ~0 — tokens only move between buckets): ${fmtUsdc(drift)} USDC`);
+
+  // True solvency: no USDC tokens created/destroyed across the three reserve
+  // buckets. Allow a tiny rounding tolerance (0.01 USDC).
+  const tolerance = AMOUNT_PRECISION / 100n;
+  const pass = (drift < 0n ? -drift : drift) <= tolerance;
+  if (!pass) notes.push("!! token reserves not conserved — real solvency leak, investigate before mainnet");
   return { name: "b-liquidation", pass, notes };
 }
 
