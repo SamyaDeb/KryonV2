@@ -74,7 +74,35 @@ reruns just the enrollment). Root-cause guard for mainnet: the deploy manifest
 must fail if any live contract references a non-manifest address — and verify
 every target's on-chain admin before phase 1.
 
-## Updated July-7 execute sequence
+## EXECUTED 2026-07-07 (core four)
+
+At 2026-07-07 ~15:45–15:49 UTC (core-four timelock matured 09:09), admin of
+the four core contracts transferred to governance `CBZT5HUXI…A6MU`:
+
+| Contract | admin now | tx |
+|---|---|---|
+| oracle-adapter | ✓ GOVERNANCE | 08c2020609… |
+| vault | ✓ GOVERNANCE | 76b2ccdc1e… |
+| engine | ✓ GOVERNANCE | b42db5dc7365… |
+| order-gateway | ✓ GOVERNANCE | 863b8b402806… |
+
+Verified on-chain (instance Admin == governance, PendingAdmin cleared). Oracle
+keeper kept publishing throughout (publisher role ≠ admin). Testnet congestion
+required retrying oracle+vault (first submits 404'd / timed out) — done via a
+direct governance.execute retry loop at fee 10 XLM. **liquidation + insurance
+still PENDING** — their proposals mature 2026-07-07T17:36:24Z (`#11 Unauthorized`
+= timelock-not-matured until then).
+
+## Remaining: liquidation + insurance (≥ 17:36:24Z) + verify
+
+1. `pm2 stop kryon-oracle` on the VM, then rerun
+   `ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET npx tsx scripts/transfer-admin-to-governance.ts execute`
+   (the 4 core will `#5` = already-executed; liq/insurance will now succeed).
+2. `ADMIN_SECRET=$ORACLE_PUBLISHER_SECRET npx tsx scripts/verify-decentralization.ts`
+   → must print "Fully decentralized".
+3. `pm2 start kryon-oracle` on the VM.
+
+## Updated July-7 execute sequence (superseded by the two blocks above)
 
 1. ≥ 2026-07-07T09:09:35Z: `pm2 stop kryon-oracle` (on the **VM** — the fleet
    lives there now: `ssh -i ~/.ssh/kryon-vm-oracle.key opc@92.4.91.30`), then
