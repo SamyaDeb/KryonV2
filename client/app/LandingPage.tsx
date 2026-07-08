@@ -7,6 +7,9 @@ import { useWalletStore } from '@/stores/wallet';
 import { freighterConnect, freighterIsInstalled } from '@/lib/stellar/freighter';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
+import { NETWORK } from '@/config';
+
+const NETWORK_LABEL = NETWORK.name === 'mainnet' ? 'Stellar Mainnet' : 'Stellar Testnet';
 
 const LANDING_NAV = [
   { to: '/trade/XLM-PERP', label: 'Trade' },
@@ -25,7 +28,7 @@ const SYSTEM_STATUS = [
 ];
 
 const HEADLINES = [
-  { title: 'XLM-PERP Now Live on Stellar Testnet', desc: 'USDC-settled perpetual futures with on-chain margin and settlement — trade self-custodial straight from your Freighter wallet.' },
+  { title: `XLM-PERP Now Live on ${NETWORK_LABEL}`, desc: 'USDC-settled perpetual futures with on-chain margin and settlement — trade self-custodial straight from your Freighter wallet.' },
   { title: 'Kryon Brings Perpetuals to Stellar', desc: 'A decentralized exchange pairing an off-chain central-limit order book with a fully on-chain margin and settlement engine on Soroban.' },
   { title: 'Sub-Second Fills, On-Chain Truth', desc: 'Price-time matching off-chain for a familiar low-latency perp experience, with custody, margin, and settlement enforced on-chain.' },
 ];

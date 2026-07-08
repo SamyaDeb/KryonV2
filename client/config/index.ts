@@ -5,45 +5,63 @@
 const STELLAR_NETWORK = process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "testnet";
 const IS_MAINNET = STELLAR_NETWORK === "mainnet";
 
-function envOrDefault(key: string, fallback: string): string {
-  const value = process.env[key];
-  if (IS_MAINNET && !value) {
-    throw new Error(`Missing ${key} for mainnet deployment`);
-  }
-  return value ?? fallback;
+// Every NEXT_PUBLIC_* access below MUST be written as a literal
+// `process.env.NEXT_PUBLIC_X` expression, not a parameterized/dynamic lookup
+// (e.g. `process.env[key]`). Next.js's client-bundle inlining only replaces
+// statically-analyzable literal expressions with their build-time value — a
+// dynamic key defeats that, silently leaving `undefined` in the browser and
+// falling through to the fallback regardless of what's actually configured.
+// (Discovered 2026-07-08: the compiled client chunk still contained the
+// testnet vault address after every Vercel-side env var was independently
+// confirmed correct — the previous `envOrDefault(key, fallback)` helper used
+// `process.env[key]`, which is exactly this anti-pattern.)
+function assertPresentOnMainnet(key: string, value: string | undefined): void {
+  if (IS_MAINNET && !value) throw new Error(`Missing ${key} for mainnet deployment`);
 }
+
+assertPresentOnMainnet("NEXT_PUBLIC_STELLAR_RPC_URL", process.env.NEXT_PUBLIC_STELLAR_RPC_URL);
+assertPresentOnMainnet("NEXT_PUBLIC_STELLAR_PASSPHRASE", process.env.NEXT_PUBLIC_STELLAR_PASSPHRASE);
+assertPresentOnMainnet("NEXT_PUBLIC_STELLAR_HORIZON_URL", process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_GOVERNANCE", process.env.NEXT_PUBLIC_CONTRACT_GOVERNANCE);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER", process.env.NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_VAULT", process.env.NEXT_PUBLIC_CONTRACT_VAULT);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_ENGINE", process.env.NEXT_PUBLIC_CONTRACT_ENGINE);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY", process.env.NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_INSURANCE", process.env.NEXT_PUBLIC_CONTRACT_INSURANCE);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_LIQUIDATION", process.env.NEXT_PUBLIC_CONTRACT_LIQUIDATION);
+assertPresentOnMainnet("NEXT_PUBLIC_CONTRACT_RISK", process.env.NEXT_PUBLIC_CONTRACT_RISK);
+assertPresentOnMainnet("NEXT_PUBLIC_ASSET_NATIVE_XLM", process.env.NEXT_PUBLIC_ASSET_NATIVE_XLM);
+assertPresentOnMainnet("NEXT_PUBLIC_ASSET_USDC", process.env.NEXT_PUBLIC_ASSET_USDC);
+assertPresentOnMainnet("NEXT_PUBLIC_USDC_ISSUER", process.env.NEXT_PUBLIC_USDC_ISSUER);
 
 export const NETWORK = {
   name: STELLAR_NETWORK,
-  rpcUrl: envOrDefault(
-    "NEXT_PUBLIC_STELLAR_RPC_URL",
-    IS_MAINNET ? "https://mainnet.sorobanrpc.com" : "https://soroban-testnet.stellar.org"
-  ),
-  passphrase: envOrDefault(
-    "NEXT_PUBLIC_STELLAR_PASSPHRASE",
-    IS_MAINNET ? "Public Global Stellar Network ; September 2015" : "Test SDF Network ; September 2015"
-  ),
-  horizonUrl: envOrDefault(
-    "NEXT_PUBLIC_STELLAR_HORIZON_URL",
-    IS_MAINNET ? "https://horizon.stellar.org" : "https://horizon-testnet.stellar.org"
-  ),
+  rpcUrl:
+    process.env.NEXT_PUBLIC_STELLAR_RPC_URL ??
+    (IS_MAINNET ? "https://mainnet.sorobanrpc.com" : "https://soroban-testnet.stellar.org"),
+  passphrase:
+    process.env.NEXT_PUBLIC_STELLAR_PASSPHRASE ??
+    (IS_MAINNET ? "Public Global Stellar Network ; September 2015" : "Test SDF Network ; September 2015"),
+  horizonUrl:
+    process.env.NEXT_PUBLIC_STELLAR_HORIZON_URL ??
+    (IS_MAINNET ? "https://horizon.stellar.org" : "https://horizon-testnet.stellar.org"),
 } as const;
 
 export const CONTRACTS = {
-  governance: envOrDefault("NEXT_PUBLIC_CONTRACT_GOVERNANCE", "CBZT5HUXI42TD55GGB5Y7OZZ72IT5SN64ONOGDYS2PFQCOWIT4XOA6MU"),
-  oracleAdapter: envOrDefault("NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER", "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP"),
-  vault: envOrDefault("NEXT_PUBLIC_CONTRACT_VAULT", "CBQ6634Z3UPXFVVHHV2JNSGXHQOZZK62Z65HCAQTINBGXS3IDXKRTRYK"),
-  engine: envOrDefault("NEXT_PUBLIC_CONTRACT_ENGINE", "CBSUYAO2EYAQVFISJQKG4TNMJPCDCPPFGI25Q3SW2BJPFSKQ45GRGTXN"),
-  orderGateway: envOrDefault("NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY", "CAJGC2SIV6DFJETJ6ATG5MR6RPNX5HQ26LYA4RGSHF2QPTBS6OJWONL3"),
-  insurance: envOrDefault("NEXT_PUBLIC_CONTRACT_INSURANCE", "CA3VD55APWCYLVN7PYGJ7NPKSQBE3VU4MWVCSKLOYAZI5RFWWR76G2CL"),
-  liquidation: envOrDefault("NEXT_PUBLIC_CONTRACT_LIQUIDATION", "CDCRNKXTTTOO7IRVC66KZR5QMVGGZIOF2QPJSVELLD7G7F4IVLM2DCMG"),
-  risk: envOrDefault("NEXT_PUBLIC_CONTRACT_RISK", "CAVCW7XCQRA6VYWBKFDABYZGDNUJYHEYKHR4TT6BQBHS6QPDGFJVYBDS"),
+  governance: process.env.NEXT_PUBLIC_CONTRACT_GOVERNANCE ?? "CBZT5HUXI42TD55GGB5Y7OZZ72IT5SN64ONOGDYS2PFQCOWIT4XOA6MU",
+  oracleAdapter: process.env.NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER ?? "CARSV4BT3II5QONUAOP4D363OUNTTSSZCXSKNNXKZCBJM7Z6UXSNZ3LP",
+  vault: process.env.NEXT_PUBLIC_CONTRACT_VAULT ?? "CBQ6634Z3UPXFVVHHV2JNSGXHQOZZK62Z65HCAQTINBGXS3IDXKRTRYK",
+  engine: process.env.NEXT_PUBLIC_CONTRACT_ENGINE ?? "CBSUYAO2EYAQVFISJQKG4TNMJPCDCPPFGI25Q3SW2BJPFSKQ45GRGTXN",
+  orderGateway: process.env.NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY ?? "CAJGC2SIV6DFJETJ6ATG5MR6RPNX5HQ26LYA4RGSHF2QPTBS6OJWONL3",
+  insurance: process.env.NEXT_PUBLIC_CONTRACT_INSURANCE ?? "CA3VD55APWCYLVN7PYGJ7NPKSQBE3VU4MWVCSKLOYAZI5RFWWR76G2CL",
+  liquidation: process.env.NEXT_PUBLIC_CONTRACT_LIQUIDATION ?? "CDCRNKXTTTOO7IRVC66KZR5QMVGGZIOF2QPJSVELLD7G7F4IVLM2DCMG",
+  risk: process.env.NEXT_PUBLIC_CONTRACT_RISK ?? "CAVCW7XCQRA6VYWBKFDABYZGDNUJYHEYKHR4TT6BQBHS6QPDGFJVYBDS",
 } as const;
 
 export const ASSETS = {
-  nativeXlm: envOrDefault("NEXT_PUBLIC_ASSET_NATIVE_XLM", "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"),
-  usdc: envOrDefault("NEXT_PUBLIC_ASSET_USDC", "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA"),
-  usdcIssuer: envOrDefault("NEXT_PUBLIC_USDC_ISSUER", "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5"),
+  nativeXlm: process.env.NEXT_PUBLIC_ASSET_NATIVE_XLM ?? "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+  usdc: process.env.NEXT_PUBLIC_ASSET_USDC ?? "CBIELTK6YBZJU5UP2WWQEUCYKLPU6AUNZ2BQ4WWFEIE3USCIHMXQDAMA",
+  usdcIssuer: process.env.NEXT_PUBLIC_USDC_ISSUER ?? "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5",
 } as const;
 
 export const MARKETS: Record<string, MarketConfig> = {
