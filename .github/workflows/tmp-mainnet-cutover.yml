@@ -44,49 +44,73 @@ jobs:
         with:
           install: "false"
 
-      # Best-effort persistence into Vercel's own dashboard config, so future
-      # ad-hoc deploys (deploy-client.yml, `vercel --prod` from a terminal)
-      # also pick up the right values. THIS deploy's correctness does not
-      # depend on it — see "Force-correct the pulled env file" below.
-      - name: Sync mainnet env vars into Vercel production (best-effort)
+      # Server Components / API routes read process.env at RUNTIME on Vercel's
+      # infrastructure from the project's actually-stored env config — the
+      # local .env.production.local overlay below only affects what gets
+      # embedded into the BUILD (client bundles). The interactive
+      # `vercel env add` CLI (piped stdin) proved unreliable (silently left
+      # NEXT_PUBLIC_ACTIVE_MARKETS empty in the first attempt), so this uses
+      # Vercel's REST API directly: GET existing envs, PATCH if present else
+      # POST, target=["production"]. This is what actually fixes runtime SSR.
+      - name: Upsert mainnet env vars via Vercel REST API
         run: |
-          set -uo pipefail
-          sync() {
-            name="$1"; value="$2"
-            npx --yes vercel env rm "$name" production --yes --token="$VERCEL_TOKEN" >/dev/null 2>&1 || true
-            printf '%s' "$value" | npx --yes vercel env add "$name" production --token="$VERCEL_TOKEN" \
-              || echo "warn: failed to sync $name (non-fatal, next deploy will retry)"
+          set -euo pipefail
+          API="https://api.vercel.com/v10/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID&upsert=true"
+          upsert() {
+            key="$1"; value="$2"
+            payload=$(jq -n --arg k "$key" --arg v "$value" \
+              '{key:$k, value:$v, type:"encrypted", target:["production"]}')
+            resp=$(curl -sS -w '\n%{http_code}' -X POST "$API" \
+              -H "Authorization: Bearer $VERCEL_TOKEN" -H "Content-Type: application/json" \
+              -d "$payload")
+            code=$(echo "$resp" | tail -1)
+            if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+              echo "  ✓ $key"
+            else
+              echo "  ✗ $key (HTTP $code): $(echo "$resp" | head -n -1 | head -c 200)"
+              return 1
+            fi
           }
-          sync NEXT_PUBLIC_STELLAR_NETWORK "mainnet"
-          sync NEXT_PUBLIC_STELLAR_RPC_URL "https://mainnet.sorobanrpc.com"
-          sync NEXT_PUBLIC_STELLAR_PASSPHRASE "Public Global Stellar Network ; September 2015"
-          sync NEXT_PUBLIC_STELLAR_HORIZON_URL "https://horizon.stellar.org"
-          sync NEXT_PUBLIC_CONTRACT_GOVERNANCE "CDSIEH7UZ62BT523G3RGJQGJHE7AI4EV265ESKZB672GTIEZNBYPYDXU"
-          sync NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER "CD3ZFYZPLJ6W2KO6HD7HE5P5Q27M5N6ITUPHQDRP23NBIVKE6WTUY25F"
-          sync NEXT_PUBLIC_CONTRACT_VAULT "CDXGTJQS3XLGXSWDUHKMS5PBBFRRKRXRWH3HTBFNXBIAYEZNDTDKLR4J"
-          sync NEXT_PUBLIC_CONTRACT_ENGINE "CD6OMHCRDDBDO7I57HCUU52RORFPP7DUIRULWFBOX5WLCO5H2OB3W6LZ"
-          sync NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY "CBA2PSRHSIFTSUAFZWMF6CARNO7YR52PWLWLEXYVRACORS2RXNO2DUTJ"
-          sync NEXT_PUBLIC_CONTRACT_INSURANCE "CCBEJ3F2PUV5OA4JNX3CPSOJFQMYMFDPLNANR2GJZVQEEBFMB6JYNL54"
-          sync NEXT_PUBLIC_CONTRACT_LIQUIDATION "CBGSXCZTZOSBMM5RLGZWWLE2USNAXL5ZKCHTZQ6DOKBD3PIEUJXFYDRO"
-          sync NEXT_PUBLIC_CONTRACT_RISK "CBHZWEIKXULFIH6DCSS7W6BJ3YUVQ5TJFYPP4UKQC4NKLNAF7VLPNVUI"
-          sync NEXT_PUBLIC_ASSET_NATIVE_XLM "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA"
-          sync NEXT_PUBLIC_ASSET_USDC "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75"
-          sync NEXT_PUBLIC_USDC_ISSUER "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
-          sync NEXT_PUBLIC_ACTIVE_MARKETS "XLM-PERP"
-          sync NEXT_PUBLIC_APP_URL "https://kryonprotocol.vercel.app"
-          sync NEXT_PUBLIC_INDEXER_URL "https://kryonprotocol.vercel.app/api"
-          sync NEXT_PUBLIC_MATCHER_URL "https://kryonprotocol.vercel.app/api"
+          fail=0
+          upsert NEXT_PUBLIC_STELLAR_NETWORK "mainnet" || fail=1
+          upsert NEXT_PUBLIC_STELLAR_RPC_URL "https://mainnet.sorobanrpc.com" || fail=1
+          upsert NEXT_PUBLIC_STELLAR_PASSPHRASE "Public Global Stellar Network ; September 2015" || fail=1
+          upsert NEXT_PUBLIC_STELLAR_HORIZON_URL "https://horizon.stellar.org" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_GOVERNANCE "CDSIEH7UZ62BT523G3RGJQGJHE7AI4EV265ESKZB672GTIEZNBYPYDXU" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER "CD3ZFYZPLJ6W2KO6HD7HE5P5Q27M5N6ITUPHQDRP23NBIVKE6WTUY25F" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_VAULT "CDXGTJQS3XLGXSWDUHKMS5PBBFRRKRXRWH3HTBFNXBIAYEZNDTDKLR4J" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_ENGINE "CD6OMHCRDDBDO7I57HCUU52RORFPP7DUIRULWFBOX5WLCO5H2OB3W6LZ" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY "CBA2PSRHSIFTSUAFZWMF6CARNO7YR52PWLWLEXYVRACORS2RXNO2DUTJ" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_INSURANCE "CCBEJ3F2PUV5OA4JNX3CPSOJFQMYMFDPLNANR2GJZVQEEBFMB6JYNL54" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_LIQUIDATION "CBGSXCZTZOSBMM5RLGZWWLE2USNAXL5ZKCHTZQ6DOKBD3PIEUJXFYDRO" || fail=1
+          upsert NEXT_PUBLIC_CONTRACT_RISK "CBHZWEIKXULFIH6DCSS7W6BJ3YUVQ5TJFYPP4UKQC4NKLNAF7VLPNVUI" || fail=1
+          upsert NEXT_PUBLIC_ASSET_NATIVE_XLM "CAS3J7GYLGXMF6TDJBBYYSE3HQ6BBSMLNUQ34T6TZMYMW2EVH34XOWMA" || fail=1
+          upsert NEXT_PUBLIC_ASSET_USDC "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75" || fail=1
+          upsert NEXT_PUBLIC_USDC_ISSUER "GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN" || fail=1
+          upsert NEXT_PUBLIC_ACTIVE_MARKETS "XLM-PERP" || fail=1
+          upsert NEXT_PUBLIC_APP_URL "https://kryonprotocol.vercel.app" || fail=1
+          upsert NEXT_PUBLIC_INDEXER_URL "https://kryonprotocol.vercel.app/api" || fail=1
+          upsert NEXT_PUBLIC_MATCHER_URL "https://kryonprotocol.vercel.app/api" || fail=1
           # No live wss:// endpoint yet (VM websocket service is not externally
           # reachable — pending OCI firewall rule + TLS termination). The
           # production readiness gate requires a syntactically valid wss:// URL;
           # the client's realtime layer only *attempts* to use it (capped,
           # jittered reconnect) and REST polling is the unconditional primary
           # data path, so this placeholder is safe until the real endpoint exists.
-          sync NEXT_PUBLIC_WS_URL "wss://ws.kryonprotocol.invalid"
-          sync DATABASE_URL "${{ secrets.DATABASE_URL }}"
-          sync MATCHER_OPERATOR_SECRET "${{ secrets.MATCHER_OPERATOR_SECRET }}"
-          sync UPSTASH_REDIS_REST_URL "${{ secrets.UPSTASH_REDIS_REST_URL }}"
-          sync UPSTASH_REDIS_REST_TOKEN "${{ secrets.UPSTASH_REDIS_REST_TOKEN }}"
+          upsert NEXT_PUBLIC_WS_URL "wss://ws.kryonprotocol.invalid" || fail=1
+          upsert DATABASE_URL "${{ secrets.DATABASE_URL }}" || fail=1
+          upsert MATCHER_OPERATOR_SECRET "${{ secrets.MATCHER_OPERATOR_SECRET }}" || fail=1
+          upsert UPSTASH_REDIS_REST_URL "${{ secrets.UPSTASH_REDIS_REST_URL }}" || fail=1
+          upsert UPSTASH_REDIS_REST_TOKEN "${{ secrets.UPSTASH_REDIS_REST_TOKEN }}" || fail=1
+          [ "$fail" -eq 0 ] || { echo "one or more env upserts failed"; exit 1; }
+
+      # Verify the API call actually stuck (values are never returned in
+      # plaintext by Vercel — this only confirms the key+target now exists).
+      - name: Verify env vars are present in Vercel
+        run: |
+          curl -sS "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/env?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            | jq -r '.envs[] | select(.target[]? == "production") | .key' | sort | grep -E "STELLAR_NETWORK|ACTIVE_MARKETS"
 
       - name: Pull Vercel environment
         run: npx --yes vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
