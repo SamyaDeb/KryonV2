@@ -174,8 +174,17 @@ jobs:
           echo "non-secret values confirmed in pulled env file:"
           grep -E "^NEXT_PUBLIC_(STELLAR_NETWORK|ACTIVE_MARKETS|CONTRACT_VAULT)=" "$ENV_FILE"
 
-      - name: Build
+      # Found the ACTUAL bug by inspecting the deployed JS chunks directly:
+      # they still embedded the OLD testnet vault address despite every prior
+      # fix (env vars correct in the pulled file, correct via REST API,
+      # correct domain/alias). Source files never changed across any of our
+      # commits, so Vercel's remote build cache kept serving a previously
+      # compiled chunk built under the old (testnet) env vars.
+      # VERCEL_FORCE_NO_BUILD_CACHE bypasses that cache for this build.
+      - name: Build (no remote cache — env vars changed, source did not)
         run: npx --yes vercel build --prod --token="$VERCEL_TOKEN"
+        env:
+          VERCEL_FORCE_NO_BUILD_CACHE: "1"
 
       - name: Deploy prebuilt output
         id: deploy
