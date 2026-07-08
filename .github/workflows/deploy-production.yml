@@ -1,14 +1,9 @@
 name: deploy-production
 
-# Deploys the trading client to Cloudflare Workers (via @opennextjs/cloudflare)
-# after a push to main, but ONLY after the readiness gate (lint, typecheck,
-# build) passes. The actual deploy runs under the `production` GitHub
-# Environment, so branch/required-reviewer protection there acts as the human
-# approval gate for a mainnet frontend.
+# Deploys the trading client to Vercel after a push to main, but ONLY after
+# the readiness gate (lint, typecheck, build) passes.
 #
-# Required environment secrets: CLOUDFLARE_API_TOKEN (Workers Scripts:Edit),
-# CLOUDFLARE_ACCOUNT_ID. Runtime secrets (DATABASE_URL, MATCHER_OPERATOR_SECRET,
-# UPSTASH_*) are set once via `wrangler secret put` — NOT through this workflow.
+# Required environment secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID.
 on:
   push:
     branches: [main]
@@ -17,8 +12,7 @@ on:
       - ".github/workflows/deploy-production.yml"
       - ".github/actions/setup-client/**"
 
-# Never run two production deploys at once and never cancel one in flight —
-# cancelling mid-deploy can leave the Worker in a half-promoted state for live traders.
+# Never run two production deploys at once and never cancel one in flight.
 concurrency:
   group: deploy-production
   cancel-in-progress: false
@@ -29,7 +23,7 @@ permissions:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Gate: identical checks to CI so we never promote a broken build to mainnet.
+  # Gate: identical checks to CI so we never promote a broken build.
   # ---------------------------------------------------------------------------
   gate:
     name: readiness gate
@@ -60,15 +54,13 @@ jobs:
         run: npm run build
 
   # ---------------------------------------------------------------------------
-  # Deploy: OpenNext build → wrangler deploy to Cloudflare Workers.
+  # Deploy: Vercel prebuilt flow for production.
   # ---------------------------------------------------------------------------
   deploy:
-    name: cloudflare production deploy
+    name: vercel production deploy
     needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 25
-    # `environment: production` enforces required reviewers / wait timers / the
-    # environment's own secrets. This is the mainnet promotion approval point.
     environment:
       name: production
       url: ${{ vars.NEXT_PUBLIC_APP_URL }}
@@ -76,29 +68,10 @@ jobs:
       run:
         working-directory: client
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-      # Build-time public config — baked into the client bundle by `next build`.
-      # These come from the production GitHub Environment's variables so the
-      # deployed Worker always matches the promoted contract set.
-      NEXT_PUBLIC_STELLAR_NETWORK: ${{ vars.NEXT_PUBLIC_STELLAR_NETWORK || 'testnet' }}
-      NEXT_PUBLIC_APP_URL: ${{ vars.NEXT_PUBLIC_APP_URL }}
-      NEXT_PUBLIC_WS_URL: ${{ vars.NEXT_PUBLIC_WS_URL }}
-      NEXT_PUBLIC_STELLAR_RPC_URL: ${{ vars.NEXT_PUBLIC_STELLAR_RPC_URL }}
-      NEXT_PUBLIC_STELLAR_HORIZON_URL: ${{ vars.NEXT_PUBLIC_STELLAR_HORIZON_URL }}
-      NEXT_PUBLIC_STELLAR_PASSPHRASE: ${{ vars.NEXT_PUBLIC_STELLAR_PASSPHRASE }}
-      NEXT_PUBLIC_ACTIVE_MARKETS: ${{ vars.NEXT_PUBLIC_ACTIVE_MARKETS || 'XLM-PERP' }}
-      NEXT_PUBLIC_CONTRACT_GOVERNANCE: ${{ vars.NEXT_PUBLIC_CONTRACT_GOVERNANCE }}
-      NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER: ${{ vars.NEXT_PUBLIC_CONTRACT_ORACLE_ADAPTER }}
-      NEXT_PUBLIC_CONTRACT_VAULT: ${{ vars.NEXT_PUBLIC_CONTRACT_VAULT }}
-      NEXT_PUBLIC_CONTRACT_ENGINE: ${{ vars.NEXT_PUBLIC_CONTRACT_ENGINE }}
-      NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY: ${{ vars.NEXT_PUBLIC_CONTRACT_ORDER_GATEWAY }}
-      NEXT_PUBLIC_CONTRACT_INSURANCE: ${{ vars.NEXT_PUBLIC_CONTRACT_INSURANCE }}
-      NEXT_PUBLIC_CONTRACT_LIQUIDATION: ${{ vars.NEXT_PUBLIC_CONTRACT_LIQUIDATION }}
-      NEXT_PUBLIC_CONTRACT_RISK: ${{ vars.NEXT_PUBLIC_CONTRACT_RISK }}
-      NEXT_PUBLIC_ASSET_NATIVE_XLM: ${{ vars.NEXT_PUBLIC_ASSET_NATIVE_XLM }}
-      NEXT_PUBLIC_ASSET_USDC: ${{ vars.NEXT_PUBLIC_ASSET_USDC }}
-      NEXT_PUBLIC_USDC_ISSUER: ${{ vars.NEXT_PUBLIC_USDC_ISSUER }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_CLI_VERSION: ${{ vars.VERCEL_CLI_VERSION || 'latest' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -108,51 +81,28 @@ jobs:
       - name: Setup
         uses: ./.github/actions/setup-client
 
-      # Build the Docusaurus docs site into client/public/docs so the same
-      # deployment serves /docs (see client/next.config.ts rewrites). Done here
-      # in the deploy job — not the CI gate — so docs build time doesn't gate releases.
-      - name: Build docs into client/public/docs
-        working-directory: docs
+      - name: Validate deploy secrets
         run: |
-          npm ci
-          npm run build
-          rm -rf ../client/public/docs
-          cp -r build ../client/public/docs
+          test -n "$VERCEL_ORG_ID"     || { echo "::error::VERCEL_ORG_ID missing";     exit 1; }
+          test -n "$VERCEL_PROJECT_ID" || { echo "::error::VERCEL_PROJECT_ID missing"; exit 1; }
+          test -n "$VERCEL_TOKEN"      || { echo "::error::VERCEL_TOKEN missing";       exit 1; }
 
-      # Skip (green, with a loud notice) when Cloudflare credentials are not yet
-      # configured, so pushes to main stay green during the migration window.
-      # Once CLOUDFLARE_API_TOKEN + CLOUDFLARE_ACCOUNT_ID are added to the
-      # production environment, this becomes a real deploy.
-      - name: Detect deploy credentials
-        id: creds
-        run: |
-          if [ -n "$CLOUDFLARE_API_TOKEN" ] && [ -n "$CLOUDFLARE_ACCOUNT_ID" ]; then
-            echo "ok=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "ok=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::Cloudflare deploy skipped — set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in Settings → Environments → production to enable it."
-            {
-              echo "### ⏭ Production deploy skipped"
-              echo "CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not configured in the production environment."
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      - name: Build Worker bundle (OpenNext)
-        if: steps.creds.outputs.ok == 'true'
-        run: npm run cf:build
-
-      # Use the OpenNext deploy wrapper directly: plain `wrangler deploy`
-      # detects the OpenNext project and re-invokes it as a child process,
-      # which double-builds and swallows error output.
-      # Retry-wrapped: the Cloudflare API can hit transient 5xx errors; a blip
-      # must not fail a release.
-      - name: Deploy to Cloudflare Workers
-        if: steps.creds.outputs.ok == 'true'
+      - name: Pull Vercel environment
         run: |
           n=0; until [ $n -ge 3 ]; do
-            npx opennextjs-cloudflare deploy && {
-              echo "### ✅ Production deploy (Cloudflare Workers)" >> "$GITHUB_STEP_SUMMARY"
-              echo "Worker: kryon-client" >> "$GITHUB_STEP_SUMMARY"
+            npx --yes vercel@"$VERCEL_CLI_VERSION" pull --yes --environment=production --token="$VERCEL_TOKEN" && break
+            n=$((n+1)); echo "pull attempt $n failed; retrying in $((n*10))s"; sleep $((n*10))
+          done; [ $n -lt 3 ]
+
+      - name: Build Vercel output
+        run: npx --yes vercel@"$VERCEL_CLI_VERSION" build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt output
+        run: |
+          n=0; until [ $n -ge 3 ]; do
+            url=$(npx --yes vercel@"$VERCEL_CLI_VERSION" deploy --prebuilt --prod --token="$VERCEL_TOKEN") && {
+              echo "Deployed: $url"
+              { echo "### ✅ Production deploy (Vercel)"; echo "$url"; } >> "$GITHUB_STEP_SUMMARY"
               break
             }
             n=$((n+1)); echo "deploy attempt $n failed; retrying in $((n*15))s"; sleep $((n*15))
