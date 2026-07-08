@@ -14,7 +14,7 @@ import { X } from "lucide-react";
 
 export function DepositWithdrawDialog({
   triggerLabel = "Deposit / Withdraw",
-  triggerClassName = "h-7 text-xs rounded-[6px] border border-[#334155] bg-[#212128] hover:border-[#475569] text-[#f5f5f5] px-3 transition-colors",
+  triggerClassName = "min-h-9 py-2 text-xs leading-tight rounded-[6px] border border-[#334155] bg-[#212128] hover:border-[#475569] text-[#f5f5f5] px-3 max-w-[100px] text-center transition-colors",
   defaultTab = "deposit",
 }: {
   triggerLabel?: string;
