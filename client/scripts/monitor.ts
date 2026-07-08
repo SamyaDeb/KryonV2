@@ -25,6 +25,7 @@
  */
 
 import { neon } from "@neondatabase/serverless";
+import { checkProtocolActivity } from "../lib/oracle-activity";
 import { WebSocket } from "ws";
 import { Contract, TransactionBuilder, Keypair, Account, rpc as sorobanRpc, nativeToScVal, scValToNative, xdr } from "@stellar/stellar-sdk";
 import { CONTRACTS, NETWORK, ACTIVE_MARKETS } from "../config";
@@ -92,11 +93,28 @@ async function checkOracleFreshness(): Promise<string> {
   for (const market of markets) {
     const contract = new Contract(CONTRACTS.oracleAdapter);
     const account = getSimAccount();
+    // override_guard = Some({max_age_secs: huge, max_confidence_bps: 10000}),
+    // NOT None. With None the contract enforces the feed's OWN stored guard
+    // (120s) and REJECTS a stale price inside the simulation (StaleOracle,
+    // CoreError #6) before this code ever sees the snapshot — indistinguishable
+    // from a genuinely broken oracle. Passing a permissive override makes
+    // get_price always return the raw snapshot; the age check below (which
+    // already knows how to tell "safely idle" from "actually stale") is the
+    // sole arbiter of whether this is a problem.
+    // max_confidence_bps is capped at 10000 by the contract's validate_guard
+    // (rejects >10_000 as InvalidConfig) — confirmed empirically via CLI
+    // against mainnet. Option::Some(guard) encodes as the map DIRECTLY, not
+    // wrapped in a vec (also confirmed via `stellar contract invoke
+    // --build-only` + xdr decode against the actual deployed contract).
+    const permissiveGuard = xdr.ScVal.scvMap([
+      new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol("max_age_secs"), val: nativeToScVal(BigInt("18446744073709551615"), { type: "u64" }) }),
+      new xdr.ScMapEntry({ key: xdr.ScVal.scvSymbol("max_confidence_bps"), val: nativeToScVal(10000, { type: "u32" }) }),
+    ]);
     const tx = new TransactionBuilder(account, { fee: "500000", networkPassphrase: NETWORK.passphrase })
       .addOperation(contract.call(
         "get_price",
         nativeToScVal(market.oracleSymbol, { type: "symbol" }),
-        xdr.ScVal.scvVoid() // Option<OracleGuard>::None
+        permissiveGuard // Option<OracleGuard>::Some(...) — bare map, no vec wrapper
       ))
       .setTimeout(10)
       .build();
@@ -112,7 +130,17 @@ async function checkOracleFreshness(): Promise<string> {
     if (!publishTime) throw new Error("oracle snapshot has no publish_time");
 
     const ageS = Math.round((Date.now() / 1000) - publishTime);
-    if (ageS > ORACLE_MAX_AGE_SECS) throw new Error(`oracle ${market.oracleSymbol} is ${ageS}s stale (max ${ORACLE_MAX_AGE_SECS}s)`);
+    if (ageS > ORACLE_MAX_AGE_SECS) {
+      // The keeper suspends publishing when nothing on-chain needs a price
+      // (no orders/settlements/positions/deposits). Staleness while idle is
+      // deliberate, not an incident — alert only if the protocol is active.
+      const activity = await checkProtocolActivity(db() as never, server);
+      if (!activity.active) {
+        results.push(`${market.oracleSymbol}=idle (${ageS}s old, publishing suspended)`);
+        continue;
+      }
+      throw new Error(`oracle ${market.oracleSymbol} is ${ageS}s stale (max ${ORACLE_MAX_AGE_SECS}s) while ACTIVE: ${activity.reasons.join(",")}`);
+    }
     results.push(`${market.oracleSymbol}=${ageS}s old`);
   }
   return results.join(", ");
