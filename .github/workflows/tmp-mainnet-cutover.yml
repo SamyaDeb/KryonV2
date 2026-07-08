@@ -44,6 +44,21 @@ jobs:
         with:
           install: "false"
 
+      - name: Diagnose - which domains/project is actually live
+        run: |
+          echo "=== project info ==="
+          curl -sS "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" | jq '{name, id, targets: (.targets // {} | keys)}'
+          echo "=== domains bound to THIS project ==="
+          curl -sS "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/domains?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.domains[].name'
+          echo "=== what project does kryonprotocol.vercel.app actually belong to? ==="
+          curl -sS "https://api.vercel.com/v9/projects/kryonprotocol.vercel.app?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" | jq '{name, id}'
+          echo "=== list ALL projects on this team ==="
+          curl -sS "https://api.vercel.com/v9/projects?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" | jq -r '.projects[] | "\(.id)  \(.name)"'
+
       # Server Components / API routes read process.env at RUNTIME on Vercel's
       # infrastructure from the project's actually-stored env config — the
       # local .env.production.local overlay below only affects what gets
