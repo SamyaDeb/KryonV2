@@ -10,6 +10,7 @@
     "lint": "eslint",
     "dev:oracle": "tsx --env-file=.env.local scripts/oracle-keeper.ts",
     "dev:indexer": "tsx --env-file=.env.local scripts/state-indexer.ts",
+    "db:seed-markets": "tsx --env-file=.env.local scripts/seed-markets.ts",
     "dev:matcher": "tsx --env-file=.env.local scripts/matcher-service.ts",
     "dev:ws": "tsx --env-file=.env.local scripts/ws-server.ts",
     "dev:reconciler": "tsx --env-file=.env.local scripts/settlement-reconciler.ts",

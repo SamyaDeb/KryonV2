@@ -486,6 +486,32 @@ async function main() {
     mark(key);
   }
 
+  // ── Step 10: seed off-chain Market row(s) ───────────────────────────────────
+  // On-chain config (Step 7) has no bearing on the Next.js app's Postgres
+  // Market table — a separate, easy-to-forget piece of state that the matcher
+  // and /api/markets/[id] both depend on. Missed entirely on the first mainnet
+  // deploy (2026-07-08): a brand-new database gets its schema from `prisma
+  // migrate deploy` but no initial rows, so every resting limit order sat
+  // unmatched forever with the matcher's oracle-band filter failing closed.
+  // Guarded (not required) because this script's primary job is on-chain and
+  // may run in a context without DATABASE_URL configured — skip with a loud
+  // reminder rather than failing the whole deploy over it.
+  console.log("\nStep 10 — Seed off-chain Market DB row(s)");
+  if (done("seed_markets")) {
+    console.log("  ✓ seed_markets already done");
+  } else if (!process.env.DATABASE_URL) {
+    console.log("  ⚠ DATABASE_URL not set — skipped. Run `npm run db:seed-markets` once it's configured.");
+  } else {
+    const { neon } = await import("@neondatabase/serverless");
+    const { seedMarkets } = await import("./seed-markets");
+    const sql = neon(process.env.DATABASE_URL);
+    const results = await seedMarkets(sql as never);
+    for (const r of results) {
+      console.log(`  ${r.inserted ? "✓ seeded" : "· already present"}  market ${r.id} (${r.symbol})`);
+    }
+    mark("seed_markets");
+  }
+
   // ── Manifest ───────────────────────────────────────────────────────────────
   console.log("\n════════════════ DEPLOYED ════════════════");
   for (const name of order) console.log(`  ${name.padEnd(20)} ${C[name]}`);

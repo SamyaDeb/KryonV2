@@ -53,3 +53,10 @@ next-env.d.ts
 # bun is optional locally; npm's package-lock.json is authoritative
 bun.lock
 bun.lockb
+
+# ad-hoc one-off test/drill/debug scripts (e.g. manual E2E trade drills) —
+# never meant to be committed; scratch work only
+_drill_*
+_scratch_*
+_tmp_*.mjs
+_tmp_*.ts

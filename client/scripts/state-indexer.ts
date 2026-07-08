@@ -36,6 +36,7 @@ const INDEXER_MARKETS = Object.values(ACTIVE_MARKETS).map((m) => ({
   id: m.marketId,
   symbol: m.symbol,
   oracleSymbol: m.oracleSymbol,
+  settlementAsset: m.settlementAsset,
 }));
 const POLL_INTERVAL_MS = 5_000;
 const PRICE_PRECISION = 1e18;
@@ -73,7 +74,7 @@ async function simulateRead(
 async function indexMarket(
   server: sorobanRpc.Server,
   sql: Sql,
-  market: { id: number; symbol: string; oracleSymbol: string }
+  market: { id: number; symbol: string; oracleSymbol: string; settlementAsset: string }
 ) {
   const u32 = (n: number) => nativeToScVal(n, { type: "u32" });
   const marketId = market.id;
@@ -108,19 +109,34 @@ async function indexMarket(
     updates["lastOraclePrice"] = String((oraclePrice as Record<string,unknown>)["price"] ?? "0");
   }
 
-  // Build the SQL SET clause dynamically
-  const setClauses = Object.entries(updates)
-    .filter(([k]) => k !== "updatedAt")
-    .map(([k, v]) => `"${k}" = '${String(v).replace(/'/g, "''")}'`)
+  // Upsert (not a plain UPDATE): if the Market row is ever missing — a fresh
+  // DB, a reset, a migration that never got a companion seed step — this
+  // recreates it from the on-chain config within one poll tick instead of
+  // silently no-op'ing forever. (Root cause of the mainnet incident where
+  // "Market" had zero rows: the deploy pipeline never seeded it and every
+  // prior tick here was an UPDATE ... WHERE id = X against a row that didn't
+  // exist, so the matcher's oracle-band filter fail-closed on every order.)
+  const dynamicCols = Object.keys(updates).filter((k) => k !== "updatedAt");
+  const insertCols = ["id", "symbol", "settlementAsset", "active", ...dynamicCols, "updatedAt", "createdAt"];
+  const insertVals = [
+    String(marketId),
+    `'${market.symbol.replace(/'/g, "''")}'`,
+    `'${market.settlementAsset.replace(/'/g, "''")}'`,
+    "true",
+    ...dynamicCols.map((k) => `'${String(updates[k]).replace(/'/g, "''")}'`),
+    "NOW()",
+    "NOW()",
+  ];
+  const conflictSet = dynamicCols
+    .map((k) => `"${k}" = EXCLUDED."${k}"`)
+    .concat(`"updatedAt" = NOW()`)
     .join(", ");
 
-  if (setClauses) {
-    await sql`
-      UPDATE "Market"
-      SET ${sql.unsafe(setClauses)}, "updatedAt" = NOW()
-      WHERE id = ${marketId}
-    `;
-  }
+  await sql`
+    INSERT INTO "Market" (${sql.unsafe(insertCols.map((c) => `"${c}"`).join(", "))})
+    VALUES (${sql.unsafe(insertVals.join(", "))})
+    ON CONFLICT (id) DO UPDATE SET ${sql.unsafe(conflictSet)}
+  `;
 
   // Update lastOraclePrice in market store to show in header
   if (oraclePrice) {
