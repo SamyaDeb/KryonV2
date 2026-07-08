@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useWalletStore } from "@/stores/wallet";
-import { STELLAR_EXPERT_URL } from "@/config";
+import { STELLAR_EXPERT_URL, NETWORK_LABEL } from "@/config";
 import { freighterSignAuthEntry, isOnExpectedNetwork } from "@/lib/stellar/freighter";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -141,7 +141,7 @@ function PendingSettlementCard({
         // Check network before signing — prevents cryptic Freighter error
         const onCorrectNetwork = await isOnExpectedNetwork();
         if (!onCorrectNetwork) {
-          throw new Error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+          throw new Error(`Freighter is on the wrong network — switch to ${NETWORK_LABEL} and try again.`);
         }
         signedAuthEntry = await freighterSignAuthEntry(settlement.authEntryXdr);
       }

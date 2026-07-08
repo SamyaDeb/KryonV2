@@ -6,10 +6,11 @@ import {
   freighterConnect,
   freighterGetAddress,
   freighterIsInstalled,
-  isOnTestnet,
+  isOnExpectedNetwork,
 } from "@/lib/stellar/freighter";
 import { shortenAddress } from "@/lib/format";
 import { toast } from "sonner";
+import { NETWORK_LABEL } from "@/config";
 
 export function WalletConnect() {
   const {
@@ -32,7 +33,7 @@ export function WalletConnect() {
       if (addr) {
         setAddress(addr);
         setConnected(true);
-        const ok = await isOnTestnet();
+        const ok = await isOnExpectedNetwork();
         if (!cancelled) setWrongNetwork(!ok);
       } else {
         setAddress(null);
@@ -60,9 +61,9 @@ export function WalletConnect() {
       const addr = await freighterConnect();
       setAddress(addr);
       setConnected(true);
-      const ok = await isOnTestnet();
+      const ok = await isOnExpectedNetwork();
       setWrongNetwork(!ok);
-      if (!ok) toast.warning("Switch Freighter to Stellar Testnet.");
+      if (!ok) toast.warning(`Switch Freighter to ${NETWORK_LABEL}.`);
       else toast.success("Wallet connected");
     } catch (e) {
       toast.error(String(e));

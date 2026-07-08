@@ -5,7 +5,7 @@ import { createPortal } from "react-dom";
 import { useWalletStore } from "@/stores/wallet";
 import { deposit, withdraw, getBalance, getTokenBalance } from "@/lib/stellar/contracts";
 import { humanToAmount, amountToHuman } from "@/lib/format";
-import { ASSETS, STELLAR_EXPERT_URL } from "@/config";
+import { ASSETS, STELLAR_EXPERT_URL, NETWORK_LABEL } from "@/config";
 import { isOnExpectedNetwork } from "@/lib/stellar/freighter";
 import { UsdcLogo } from "@/components/common/AssetLogos";
 import { toast } from "sonner";
@@ -72,7 +72,7 @@ export function DepositWithdrawDialog({
     const onCorrectNetwork = await isOnExpectedNetwork();
     if (!onCorrectNetwork) {
       setWrongNetwork(true);
-      toast.error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+      toast.error(`Freighter is on the wrong network — switch to ${NETWORK_LABEL} and try again.`);
       return;
     }
     setWrongNetwork(false);
@@ -236,7 +236,7 @@ export function DepositWithdrawDialog({
                 </button>
 
                 <p className="mt-3 text-[11px] text-[#737373] text-center">
-                  Signed via Freighter and submitted to Stellar testnet.
+                  Signed via Freighter and submitted to {NETWORK_LABEL}.
                 </p>
               </div>
             </div>

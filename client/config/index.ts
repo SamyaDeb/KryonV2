@@ -168,3 +168,5 @@ export const WS_URL =
 
 export const STELLAR_EXPERT_URL =
   IS_MAINNET ? "https://stellar.expert/explorer/public" : "https://stellar.expert/explorer/testnet";
+
+export const NETWORK_LABEL = IS_MAINNET ? "Stellar Mainnet" : "Stellar Testnet";

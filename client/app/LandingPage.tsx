@@ -7,9 +7,7 @@ import { useWalletStore } from '@/stores/wallet';
 import { freighterConnect, freighterIsInstalled } from '@/lib/stellar/freighter';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
-import { NETWORK } from '@/config';
-
-const NETWORK_LABEL = NETWORK.name === 'mainnet' ? 'Stellar Mainnet' : 'Stellar Testnet';
+import { NETWORK_LABEL } from '@/config';
 
 const LANDING_NAV = [
   { to: '/trade/XLM-PERP', label: 'Trade' },
@@ -329,13 +327,13 @@ export function LandingPage() {
     }
     setConnecting(true);
     try {
-      const { freighterConnect, isOnTestnet } = await import('@/lib/stellar/freighter');
+      const { freighterConnect, isOnExpectedNetwork } = await import('@/lib/stellar/freighter');
       const addr = await freighterConnect();
       setAddress(addr);
       setConnected(true);
-      const ok = await isOnTestnet();
+      const ok = await isOnExpectedNetwork();
       setWrongNetwork(!ok);
-      if (!ok) toast.warning('Switch Freighter to Stellar Testnet.');
+      if (!ok) toast.warning(`Switch Freighter to ${NETWORK_LABEL}.`);
       else toast.success('Wallet connected');
       router.push('/trade/XLM-PERP');
     } catch (e) {

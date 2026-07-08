@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useWalletStore } from "@/stores/wallet";
 import { useMarketStore } from "@/stores/market";
-import { MarketConfig, AMOUNT_PRECISION, PRICE_PRECISION, ASSETS } from "@/config";
+import { MarketConfig, AMOUNT_PRECISION, PRICE_PRECISION, ASSETS, NETWORK_LABEL } from "@/config";
 import { buildOrderIntent } from "@/lib/market/order-intent";
 import { submitOrder } from "@/lib/market/matcher";
 import { useLocalOrders } from "@/stores/orders";
@@ -254,7 +254,7 @@ export function OrderEntry({
     const onCorrectNetwork = await isOnExpectedNetwork();
     if (!onCorrectNetwork) {
       setWrongNetwork(true);
-      toast.error("Freighter is on the wrong network — switch to Stellar Testnet and try again.");
+      toast.error(`Freighter is on the wrong network — switch to ${NETWORK_LABEL} and try again.`);
       return;
     }
     setWrongNetwork(false);
