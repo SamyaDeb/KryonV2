@@ -37,7 +37,16 @@ assertRequiredSecrets(["DATABASE_URL", "ORACLE_PUBLISHER_SECRET"]);
 assertNoPublicSecretLeak();
 
 const PRICE_PRECISION = BigInt("1000000000000000000"); // 1e18
-const PUBLISH_INTERVAL_MS = 8_000; // every 8s — oracle guard max_age is 60s
+// Fetch every 8s (fast deviation detection) but PUBLISH only on deviation or
+// heartbeat — on mainnet every publish costs real fees (~0.0004 XLM), and
+// blind 8s publishing burns ~8.5 XLM/day. Heartbeats MUST stay under the
+// on-chain OracleGuard max_age_secs (120s) or settlement fail-stops between
+// publishes.
+const FETCH_INTERVAL_MS = 8_000;
+const PUBLISH_DEVIATION_BPS = Number(process.env.PUBLISH_DEVIATION_BPS ?? "30");
+const PUBLISH_HEARTBEAT_SECS = Number(process.env.PUBLISH_HEARTBEAT_SECS ?? "60");
+const USDC_PUBLISH_DEVIATION_BPS = Number(process.env.USDC_PUBLISH_DEVIATION_BPS ?? "10");
+const USDC_PUBLISH_HEARTBEAT_SECS = Number(process.env.USDC_PUBLISH_HEARTBEAT_SECS ?? "90");
 const MIN_SOURCES = Number(process.env.ORACLE_MIN_SOURCES ?? "2");
 const MAX_SOURCE_DEVIATION_BPS = Number(process.env.ORACLE_MAX_SOURCE_DEVIATION_BPS ?? "200");
 const USDC_DEPEG_HALT_BPS = Number(process.env.USDC_DEPEG_HALT_BPS ?? "100");
@@ -175,9 +184,21 @@ async function run() {
   console.log(`  Network   : ${NETWORK.name}`);
   console.log(`  Contract  : ${CONTRACTS.oracleAdapter}`);
   console.log(`  Markets   : ${ORACLE_MARKETS.map((m) => `${m.symbol}:${m.priceSourceSymbol}`).join(", ")}`);
-  console.log(`  Interval  : ${PUBLISH_INTERVAL_MS / 1000}s`);
+  console.log(`  Fetch     : ${FETCH_INTERVAL_MS / 1000}s; publish on ${PUBLISH_DEVIATION_BPS}bps move or ${PUBLISH_HEARTBEAT_SECS}s heartbeat (USDC: ${USDC_PUBLISH_DEVIATION_BPS}bps/${USDC_PUBLISH_HEARTBEAT_SECS}s)`);
 
-  async function writePrice(oracleSymbol: string, price: bigint, confidence: bigint, publishTime: bigint) {
+  // Last successfully published price/time per asset, for deviation+heartbeat
+  // gating. Only updated on confirmed success so failures retry next fetch.
+  const lastPublished = new Map<string, { price: bigint; ts: number }>();
+
+  function shouldPublish(asset: string, price: bigint, deviationBps: number, heartbeatSecs: number): boolean {
+    const last = lastPublished.get(asset);
+    if (!last) return true;
+    if (Date.now() - last.ts >= heartbeatSecs * 1000) return true;
+    const diff = price > last.price ? price - last.price : last.price - price;
+    return Number((diff * 10_000n) / last.price) >= deviationBps;
+  }
+
+  async function writePrice(oracleSymbol: string, price: bigint, confidence: bigint, publishTime: bigint): Promise<boolean> {
     // Fetch real sequence for submission
     const onChainAccount = await server.getAccount(publisherAddress);
     const assetArg = nativeToScVal(oracleSymbol, { type: "symbol" });
@@ -200,7 +221,7 @@ async function run() {
     const simResult = await server.simulateTransaction(tx);
     if (sorobanRpc.Api.isSimulationError(simResult)) {
       process.stdout.write(` ✗ sim: ${simResult.error?.slice(0, 80)}\n`);
-      return;
+      return false;
     }
 
     const prepared = sorobanRpc.assembleTransaction(tx, simResult).build();
@@ -209,7 +230,7 @@ async function run() {
     const send = await server.sendTransaction(prepared);
     if (send.status === "ERROR") {
       process.stdout.write(` ✗ submit: ${send.errorResult?.toXDR("base64")?.slice(0, 60)}\n`);
-      return;
+      return false;
     }
 
     // Poll for confirmation
@@ -218,14 +239,15 @@ async function run() {
       const poll = await server.getTransaction(send.hash);
       if (poll.status === "SUCCESS") {
         process.stdout.write(` ✓ ${send.hash.slice(0, 12)}\n`);
-        return;
+        return true;
       }
       if (poll.status === "FAILED") {
         process.stdout.write(` ✗ tx failed\n`);
-        return;
+        return false;
       }
     }
     process.stdout.write(` ? timeout\n`);
+    return false; // ambiguous — retry next fetch; a duplicate publish is harmless
   }
 
   async function publishMarket(market: (typeof ORACLE_MARKETS)[number]) {
@@ -236,9 +258,12 @@ async function run() {
         () => krakenPrice(market.baseAsset),
       ]);
       if (!agg) return; // fail-safe: skip tick, on-chain staleness guard takes over
+      if (!shouldPublish(market.oracleSymbol, agg.price, PUBLISH_DEVIATION_BPS, PUBLISH_HEARTBEAT_SECS)) return;
       const priceHuman = Number(agg.price) / Number(PRICE_PRECISION);
       process.stdout.write(`\r  Publishing ${market.oracleSymbol} $${priceHuman.toFixed(4)} (${agg.sources} sources) at ${new Date().toISOString().slice(11, 19)}...`);
-      await writePrice(market.oracleSymbol, agg.price, agg.confidence, agg.publishTime);
+      if (await writePrice(market.oracleSymbol, agg.price, agg.confidence, agg.publishTime)) {
+        lastPublished.set(market.oracleSymbol, { price: agg.price, ts: Date.now() });
+      }
     } catch (e) {
       process.stdout.write(` ✗ ${(e as Error).message?.slice(0, 100)}\n`);
     }
@@ -279,15 +304,31 @@ async function run() {
         return;
       }
 
+      if (!shouldPublish("USDC", price, USDC_PUBLISH_DEVIATION_BPS, USDC_PUBLISH_HEARTBEAT_SECS)) return;
       const priceHuman = Number(price) / Number(PRICE_PRECISION);
       process.stdout.write(`\r  Publishing USDC $${priceHuman.toFixed(4)} at ${new Date().toISOString().slice(11, 19)}...`);
-      await writePrice("USDC", price, confidence, BigInt(Math.floor(Date.now() / 1000)));
+      if (await writePrice("USDC", price, confidence, BigInt(Math.floor(Date.now() / 1000)))) {
+        lastPublished.set("USDC", { price, ts: Date.now() });
+      }
     } catch (e) {
       process.stdout.write(` ✗ ${(e as Error).message?.slice(0, 100)}\n`);
     }
   }
 
+  // Confirmation polling can outlast the fetch interval; overlapping ticks
+  // race the publisher's sequence number and double-publish at heartbeats.
+  let ticking = false;
   async function tick() {
+    if (ticking) return;
+    ticking = true;
+    try {
+      await tickInner();
+    } finally {
+      ticking = false;
+    }
+  }
+
+  async function tickInner() {
     for (const market of ORACLE_MARKETS) {
       await publishMarket(market);
     }
@@ -296,7 +337,7 @@ async function run() {
 
   // Run immediately then on interval
   await tick();
-  setInterval(tick, PUBLISH_INTERVAL_MS);
+  setInterval(tick, FETCH_INTERVAL_MS);
 }
 
 function sleep(ms: number) {

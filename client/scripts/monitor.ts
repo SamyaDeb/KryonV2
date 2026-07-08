@@ -35,7 +35,10 @@ const APP_URL = process.env.MONITOR_APP_URL ?? process.env.NEXT_PUBLIC_APP_URL ?
 // (NEXT_PUBLIC_WS_URL) differs from what the monitor host can reach.
 const WS_URL = process.env.MONITOR_WS_URL ?? process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:8080";
 
-const ORACLE_MAX_AGE_SECS = 60;
+// Alert margin under the on-chain OracleGuard max_age (120s): the keeper
+// heartbeats at 60s (XLM) / 90s (USDC) + ~10s confirm latency, so a healthy
+// feed peaks ~100s; alerting at 110s fires before settlement actually halts.
+const ORACLE_MAX_AGE_SECS = Number(process.env.ORACLE_FRESHNESS_ALERT_SECS ?? "110");
 const MATCHER_LAG_WARN_SECS = 60;
 const INDEXER_LAG_WARN_SECS = 60;
 const DB_LATENCY_WARN_MS = 2_000;
