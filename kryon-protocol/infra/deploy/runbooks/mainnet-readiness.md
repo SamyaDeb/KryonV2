@@ -15,7 +15,28 @@
 
 ## Launch Sequence
 
-1. Upload contract Wasm.
+1. Build and shrink contract Wasm, then upload the optimized artifacts:
+
+   ```sh
+   cargo build --release --target wasm32v1-none \
+     -p perp-vault -p perp-engine -p perp-order-gateway -p perp-risk \
+     -p perp-oracle-adapter -p perp-insurance -p perp-liquidation -p perp-governance
+   python3 infra/deploy/optimize-wasm.py --all \
+     target/wasm32v1-none/release target/wasm32v1-none/release/deploy
+   ```
+
+   Upload fees are rent-dominated, and rent is charged on the parsed
+   module: code/data sections cost ~1.7 XLM per KB while custom sections
+   (the ABI spec) are nearly free (~0.07 XLM/KB) — so shrink code, and do
+   NOT strip the contract spec (loses on-chain ABI discovery to save
+   ~0.3 XLM per contract; the pipeline's `--strip-spec` flag exists but is
+   not worth it). The pipeline (deep wasm-opt + spec doc-string stripping,
+   interface preserved) plus the `#[inline(never)]` on
+   `protocol_core::fixed::mul_div` saves ~65 XLM versus plain
+   `stellar contract optimize` at current mainnet rates (simulated
+   2026-07-05: 304.2 XLM total for all eight contracts).
+   Record the sha256 of each `deploy/*.wasm` in the deployment manifest —
+   these, not the raw builds, are the canonical mainnet artifacts.
 2. Deploy governance.
 3. Deploy oracle, vault, engine, insurance, liquidation, gateway, and risk contracts.
 4. Initialize contracts with the approved deployment signer, nominate governance as pending admin on every contract, and accept admin from the governance-controlled signer before enabling markets.

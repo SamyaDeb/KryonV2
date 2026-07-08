@@ -28,7 +28,9 @@ pub fn checked_div(a: i128, b: i128) -> Result<i128, CoreError> {
     a.checked_div(b).ok_or(CoreError::MathOverflow)
 }
 
-#[inline]
+// inline(never): the I256 widening mul/div body is ~1.3KB of wasm; inlining it
+// at every call site tripled its footprint. One shared copy per contract.
+#[inline(never)]
 pub fn mul_div(a: i128, b: i128, denominator: i128) -> Result<i128, CoreError> {
     if denominator == 0 {
         return Err(CoreError::DivisionByZero);

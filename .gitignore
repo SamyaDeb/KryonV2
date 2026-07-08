@@ -17,6 +17,10 @@ kryon-protocol/node_modules/
 .env.local
 .env.*.local
 
+# Deploy secrets (private keys — never commit)
+kryon-protocol/infra/deploy/*secrets*.env
+kryon-protocol/infra/deploy/__pycache__/
+
 # OS
 .DS_Store
 Thumbs.db

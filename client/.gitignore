@@ -35,6 +35,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# .env.mainnet holds only public NEXT_PUBLIC_* values (network/contract addresses) — safe to commit
+!.env.mainnet
 
 # vercel
 .vercel
