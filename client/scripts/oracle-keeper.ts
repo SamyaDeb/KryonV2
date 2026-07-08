@@ -31,7 +31,9 @@ import {
   xdr,
   rpc as sorobanRpc,
 } from "@stellar/stellar-sdk";
+import { neon } from "@neondatabase/serverless";
 import { ACTIVE_MARKETS, CONTRACTS, NETWORK } from "../config";
+import { checkProtocolActivity } from "../lib/oracle-activity";
 import { assertRequiredSecrets, assertNoPublicSecretLeak } from "../lib/secrets-check";
 assertRequiredSecrets(["DATABASE_URL", "ORACLE_PUBLISHER_SECRET"]);
 assertNoPublicSecretLeak();
@@ -47,6 +49,11 @@ const PUBLISH_DEVIATION_BPS = Number(process.env.PUBLISH_DEVIATION_BPS ?? "30");
 const PUBLISH_HEARTBEAT_SECS = Number(process.env.PUBLISH_HEARTBEAT_SECS ?? "60");
 const USDC_PUBLISH_DEVIATION_BPS = Number(process.env.USDC_PUBLISH_DEVIATION_BPS ?? "10");
 const USDC_PUBLISH_HEARTBEAT_SECS = Number(process.env.USDC_PUBLISH_HEARTBEAT_SECS ?? "90");
+// Activity-aware idling: publishing stops entirely when nothing on-chain
+// needs a fresh price (no orders, no settlements, no positions, no vault
+// deposits) — see lib/oracle-activity.ts. Checks are cached and fail open.
+const ACTIVITY_CHECK_INTERVAL_MS = Number(process.env.ACTIVITY_CHECK_INTERVAL_MS ?? "30000");
+const IDLE_GRACE_SECS = Number(process.env.IDLE_GRACE_SECS ?? "900");
 const MIN_SOURCES = Number(process.env.ORACLE_MIN_SOURCES ?? "2");
 const MAX_SOURCE_DEVIATION_BPS = Number(process.env.ORACLE_MAX_SOURCE_DEVIATION_BPS ?? "200");
 const USDC_DEPEG_HALT_BPS = Number(process.env.USDC_DEPEG_HALT_BPS ?? "100");
@@ -315,6 +322,36 @@ async function run() {
     }
   }
 
+  // ── Activity-aware idling ──────────────────────────────────────────────────
+  const sql = neon(process.env.DATABASE_URL!);
+  let lastActivityCheck = 0;
+  let lastActiveAt = Date.now(); // assume active on boot until proven idle
+  let cachedReasons: string[] = [];
+  let idleLogged = false;
+
+  async function isPublishingNeeded(): Promise<boolean> {
+    const now = Date.now();
+    if (now - lastActivityCheck >= ACTIVITY_CHECK_INTERVAL_MS) {
+      lastActivityCheck = now;
+      const status = await checkProtocolActivity(sql as never, server);
+      cachedReasons = status.reasons;
+      if (status.active) lastActiveAt = now;
+    }
+    const withinGrace = now - lastActiveAt < IDLE_GRACE_SECS * 1000;
+    if (withinGrace) {
+      if (idleLogged) {
+        console.log(`  ▶ resuming publishing (${cachedReasons.join(", ") || "grace"})`);
+        idleLogged = false;
+      }
+      return true;
+    }
+    if (!idleLogged) {
+      console.log(`  ⏸ idle — no orders, settlements, positions, or vault deposits; publishing suspended (checks every ${ACTIVITY_CHECK_INTERVAL_MS / 1000}s)`);
+      idleLogged = true;
+    }
+    return false;
+  }
+
   // Confirmation polling can outlast the fetch interval; overlapping ticks
   // race the publisher's sequence number and double-publish at heartbeats.
   let ticking = false;
@@ -322,7 +359,7 @@ async function run() {
     if (ticking) return;
     ticking = true;
     try {
-      await tickInner();
+      if (await isPublishingNeeded()) await tickInner();
     } finally {
       ticking = false;
     }
