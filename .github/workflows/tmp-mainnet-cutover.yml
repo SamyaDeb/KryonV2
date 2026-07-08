@@ -178,7 +178,22 @@ jobs:
         run: npx --yes vercel build --prod --token="$VERCEL_TOKEN"
 
       - name: Deploy prebuilt output
+        id: deploy
         run: |
           url=$(npx --yes vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
           echo "Deployed: $url"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
           { echo "### mainnet cutover deploy"; echo "$url"; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Diagnose - is the custom domain actually aliased to this deployment
+        run: |
+          sleep 5
+          echo "=== last 3 production deployments (id, url, createdAt, state) ==="
+          curl -sS "https://api.vercel.com/v6/deployments?projectId=$VERCEL_PROJECT_ID&teamId=$VERCEL_ORG_ID&target=production&limit=3" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" \
+            | jq '.deployments[] | {uid, url, createdAt, state}'
+          echo "=== who currently owns kryonprotocol.vercel.app (alias lookup) ==="
+          curl -sS "https://api.vercel.com/v9/projects/$VERCEL_PROJECT_ID/domains/kryonprotocol.vercel.app?teamId=$VERCEL_ORG_ID" \
+            -H "Authorization: Bearer $VERCEL_TOKEN" | jq .
+          echo "=== force-alias the just-built deployment to the custom domain ==="
+          npx --yes vercel alias set "${{ steps.deploy.outputs.url }}" kryonprotocol.vercel.app --token="$VERCEL_TOKEN" --scope="$VERCEL_ORG_ID" || echo "alias set failed (see above)"
