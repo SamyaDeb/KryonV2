@@ -33,7 +33,7 @@ jobs:
     steps:
       # Local composite actions require the repo on disk first.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -77,7 +77,7 @@ jobs:
         working-directory: kryon-protocol
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -142,7 +142,7 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -185,7 +185,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
